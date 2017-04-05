@@ -19,7 +19,7 @@ tf.app.flags.DEFINE_string('train_generation', None,
         """train-model generation""")
 tf.app.flags.DEFINE_string('test_generation', None,
         """test-model generation""")
-tf.app.flags.DEFINE_float('learn_rate', 0.0002, """learning rate""")
+tf.app.flags.DEFINE_float('learn_rate', 0.0005, """learning rate""")
 tf.app.flags.DEFINE_string('copy_from', None, """copy from model""")
 tf.app.flags.DEFINE_string('copy_to', None, """copy to model""")
 tf.app.flags.DEFINE_float('train_epsilon', 0.01, """epsilon greedy""")
@@ -81,19 +81,19 @@ class Network:
                 name = "y")
         self.actions = tf.placeholder(shape=[None, 2], dtype=tf.int32,
                 name = "actions")
-        self.actions_flat = tf.slice(self.actions, [0, 0], [-1, 1]) \
-                * self.size + tf.slice(self.actions, [0, 1], [-1, 1])
+        self.actions_flat = tf.reshape( \
+                tf.slice(self.actions, [0, 0], [-1, 1]) \
+                * self.size + tf.slice(self.actions, [0, 1], [-1, 1]), [-1])
 
-        X = tf.to_float(self.input, name = "X")
-        conv1 = tf.contrib.layers.conv2d(X, 8, 5, 1,
+        conv1 = tf.contrib.layers.conv2d(self.input, 8, 5, 1,
                 activation_fn=tf.nn.relu)
         conv2 = tf.contrib.layers.conv2d(conv1, 64, 3, 1,
                 activation_fn=tf.nn.relu)
         flat= tf.contrib.layers.flatten(conv2)
         fc1 = tf.contrib.layers.fully_connected(flat, 8 * flatsize)
         self.predictions=tf.contrib.layers.fully_connected(fc1, flatsize)
-        samples = tf.shape(X)[0]
-        masks = tf.reshape(tf.slice(X, [0, 0, 0, 2], [-1, -1, -1, 1]),
+        samples = tf.shape(self.input)[0]
+        masks = tf.reshape(tf.slice(self.input, [0, 0, 0, 2], [-1, -1, -1, 1]),
                 [samples, -1])
         rev_masks = 1.0 - masks
         self.legal_moves = self.predictions * rev_masks  + \
@@ -101,10 +101,9 @@ class Network:
                 (tf.reduce_min(self.predictions, reduction_indices=[1]) - 1.0))
 
         # [0, output, 2*output, ..., (samples-1)*output] + actions
-        index = tf.range(samples) * tf.shape(self.predictions)[1] + \
+        self.index = tf.range(samples) * tf.shape(self.predictions)[1] + \
                 self.actions_flat
-        self.pred = tf.gather(tf.reshape(self.predictions, [-1]),
-                index)
+        self.pred = tf.gather(tf.reshape(self.predictions, [-1]), self.index)
         self.losses = tf.squared_difference(self.y, self.pred)
         self.loss = tf.reduce_mean(self.losses)
         self.optimizer=tf.train.RMSPropOptimizer(FLAGS.learn_rate, 0.99)
@@ -222,16 +221,18 @@ class DqntrainAgent(DqnAgent):
         ends = []
         orig = []
         actions = []
+        rewards = []
         for sample in mini_batch:
             orig_board, self_mv, opponent_mv, new_board, reward, end, _ = sample
             inputs.append(np.stack(new_board, axis = -1))
             ends.append(1 - end)
             orig.append(np.stack(orig_board, axis = -1))
             actions.append(self_mv)
+            rewards.append(reward)
         move, _ = self.select(inputs, self.q_network)
         _, outtgt = self.select(inputs, self.target_network)
         best = np.array(ends) * outtgt[range(len(move)), move]
-        outtgt = reward + best * FLAGS.gamma
+        outtgt = rewards + best * FLAGS.gamma
 
         step_var = tf.contrib.framework.get_global_step()
         _, loss, steps = self.q_network.session.run(
@@ -265,7 +266,7 @@ class DqntrainAgent(DqnAgent):
     def info(self):
         if not self.losses:
             return
-        print(" loss = {:.3f}".format(sum(self.losses) / len(self.losses)), end="")
+        print(" loss = {:.3f} ".format(sum(self.losses) / len(self.losses)), end="")
         self.losses = []
 
 class DqntestAgentOne(DqnAgent):
