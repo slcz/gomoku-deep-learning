@@ -25,12 +25,14 @@ tf.app.flags.DEFINE_string('copy_to', None, """copy to model""")
 tf.app.flags.DEFINE_float('train_epsilon', 0.01, """epsilon greedy""")
 tf.app.flags.DEFINE_float('test_epsilon', 0.01, """epsilon greedy""")
 tf.app.flags.DEFINE_float('sample_weight', 0.7, """sampling weight""")
+tf.app.flags.DEFINE_float('epsilon_decay', 0.8, """epsilon decay rate""")
 tf.app.flags.DEFINE_integer('trainbatch', 64, """training batch size""")
 tf.app.flags.DEFINE_integer('samplesize', 128, """samples""")
 tf.app.flags.DEFINE_integer('replay_size', 1000000, """replay buffer size""")
 tf.app.flags.DEFINE_integer('train_iterations', 1, """training iterations""")
 tf.app.flags.DEFINE_integer('observations', 5000, """initial observations""")
 tf.app.flags.DEFINE_integer('save_interval', 5000, """intervals to save model""")
+tf.app.flags.DEFINE_integer('decay_interval', 10000, """intervals to epsilon decay""")
 tf.app.flags.DEFINE_float('gamma', 0.7, """gamma""")
 tf.app.flags.DEFINE_integer('copy_network_interval', 2000, """intervals to copy network from qnet to targetnet""")
 
@@ -85,9 +87,9 @@ class Network:
                 tf.slice(self.actions, [0, 0], [-1, 1]) \
                 * self.size + tf.slice(self.actions, [0, 1], [-1, 1]), [-1])
 
-        conv1 = tf.contrib.layers.conv2d(self.input, 8, 5, 1,
+        conv1 = tf.contrib.layers.conv2d(self.input, 8, 3, 1,
                 activation_fn=tf.nn.relu)
-        conv2 = tf.contrib.layers.conv2d(conv1, 64, 3, 1,
+        conv2 = tf.contrib.layers.conv2d(conv1, 64, 5, 1,
                 activation_fn=tf.nn.relu)
         flat= tf.contrib.layers.flatten(conv2)
         fc1 = tf.contrib.layers.fully_connected(flat, 8 * flatsize)
@@ -242,6 +244,9 @@ class DqntrainAgent(DqnAgent):
                               self.q_network.actions : actions } )
         if steps > 0 and steps % FLAGS.save_interval == 0:
             self.q_network.save()
+        if steps > 0 and steps % FLAGS.decay_interval == 0:
+            self.epsilon *= FLAGS.epsilon_decay
+            print("New Epsilon {}".format(self.epsilon))
         self.losses.append(loss)
 
     def finish(self, reward):

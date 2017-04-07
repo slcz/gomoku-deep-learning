@@ -159,7 +159,7 @@ def main(argv=None):
     if FLAGS.board:
         summary_interval = 1
     else:
-        summary_interval = 100
+        summary_interval = 1000
 
     games = 0
     games_delta = 0
