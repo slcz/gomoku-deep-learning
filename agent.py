@@ -2,14 +2,15 @@ import random
 import numpy as np
 
 class Agent:
-    def __init__(self, size, session):
+    def __init__(self, size, session, threads):
         self.size = size
         self.session = session
-    def opponent_move(self, position):
+        self.threads = threads
+    def opponent_move(self, position, thread):
         pass
-    def self_move(self):
+    def self_move(self, thread):
         pass
-    def finish(self, result):
+    def finish(self, result, thread):
         pass
     def clear(self):
         pass
@@ -25,35 +26,42 @@ class Agent:
         pass
 
 class RandomAgent(Agent):
-    def __init__(self, size, session):
-        super().__init__(size, session)
+    def __init__(self, size, session, threads):
+        super().__init__(size, session, threads)
         self.clear()
     def clear(self):
-        self.board = np.zeros((self.size, self.size), dtype=np.bool_)
+        self.boards = []
+        for i in range(self.threads):
+            self.boards.append(np.zeros((self.size, self.size), dtype=np.bool_))
     def name(self):
         return "X"
-    def opponent_move(self, position):
+    def opponent_move(self, position, thread):
         x, y = position
-        assert not self.board[x, y]
-        self.board[x, y] = True
-    def self_move(self):
-        move = super().random_policy(self.board)
-        self.board[move] = True
+        board = self.boards[thread]
+        assert not board[x, y]
+        board[x, y] = True
+    def self_move(self, thread):
+        board = self.boards[thread]
+        move = super().random_policy(board)
+        board[move] = True
         return move
 
 class HumanAgent(Agent):
-    def __init__(self, size, session):
-        super().__init__(size, session)
+    def __init__(self, size, session, threads):
+        assert(threads == 1)
+        super().__init__(size, session, threads)
         self.clear()
     def clear(self):
         self.board = np.zeros((self.size, self.size), dtype=np.bool_)
     def name(self):
         return "H"
-    def opponent_move(self, position):
+    def opponent_move(self, position, thread):
+        assert(thread == 0)
         x, y = position
         assert not self.board[x, y]
         self.board[x, y] = True
-    def self_move(self):
+    def self_move(self, thread):
+        assert(thread == 0)
         x, y = None, None
         while True:
             move_str = input("enter your move e.g. a1:")
@@ -66,4 +74,3 @@ class HumanAgent(Agent):
                 break
         self.board[x, y] = True
         return x, y
-

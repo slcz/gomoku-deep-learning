@@ -87,32 +87,45 @@ class Gomoku:
             print()
         print()
 
-def play_game(game, players, display):
+def play_game(games, players, display):
     for player in players:
         player.agent.clear()
-    game.clear((players[0].str, players[1].str))
-    if display:
-        game.print()
-    result = Result.CONTINUE
-    moves = 0
-    a, b = players
-    while result == Result.CONTINUE:
-        move = a.agent.self_move()
-        b.agent.opponent_move(move)
-        a, b = b, a
-        result = game.move(move)
+    for game in games:
+        game.clear((players[0].str, players[1].str))
         if display:
             game.print()
-        moves += 1
+    nr = len(games)
+    results = []
+    moves = []
+    game_players = []
+    for i in range(nr):
+        results.append(Result.CONTINUE)
+        moves.append(0)
+        game_players.append(players)
+    done = 0
+    while done < nr:
+        for i, game in enumerate(games):
+            if results[i] == Result.CONTINUE:
+                a, b = game_players[i]
+                move = a.agent.self_move(i)
+                b.agent.opponent_move(move, i)
+                game_players[i] = b, a
+                a, b = game_players[i]
+                results[i] = game.move(move)
+                if display:
+                    game.print()
+                moves[i] += 1
 
-    if result == Result.WIN:
-        b.agent.finish(1.0)
-        a.agent.finish(-1.0)
-    elif result == Result.TIE:
-        b.agent.finish(0.0)
-        a.agent.finish(0.0)
+                if results[i] == Result.WIN:
+                    b.agent.finish(1.0, i)
+                    a.agent.finish(-1.0, i)
+                    done += 1
+                elif results[i] == Result.TIE:
+                    b.agent.finish(0.0, i)
+                    a.agent.finish(0.0, i)
+                    done += 1
 
-    return moves, result
+    return moves, results
 
 class Player:
     def __init__(self):
@@ -128,6 +141,7 @@ tf.app.flags.DEFINE_boolean('board', False, "display board")
 tf.app.flags.DEFINE_integer('boardsize', 9, "board size")
 tf.app.flags.DEFINE_integer('connections', 5, "connected stones to win")
 tf.app.flags.DEFINE_boolean('clone', False, "clone networks")
+tf.app.flags.DEFINE_integer('concurrency', 1, "concurrency")
 
 def main(argv=None):
     tf.logging.set_verbosity(tf.logging.ERROR)
@@ -141,7 +155,8 @@ def main(argv=None):
     p1, p2 = players = (Player(), Player())
     i = 0
     for p_ in FLAGS.agent1, FLAGS.agent2:
-        p = p_.capitalize() + 'Agent({}, {})'.format(FLAGS.boardsize, "sess")
+        p = p_.capitalize() + 'Agent({}, {}, {})'.format(FLAGS.boardsize,
+                "sess", FLAGS.concurrency)
         try:
             players[i].agent = eval(p)
         except (NameError, ValueError, SyntaxError):
@@ -155,44 +170,52 @@ def main(argv=None):
     if players[0].str == players[1].str:
         players[0].str = 'X'
         players[1].str = 'O'
-    game = Gomoku(FLAGS.boardsize, FLAGS.connections, (players[0].str, players[1].str))
+    games = []
+    for i in range(FLAGS.concurrency):
+        games.append(Gomoku(FLAGS.boardsize,
+            FLAGS.connections, (players[0].str, players[1].str)))
     if FLAGS.board:
         summary_interval = 1
     else:
-        summary_interval = 1000
+        summary_interval = 16
 
-    games = 0
-    games_delta = 0
+    nr_games = 0
+    nr_games_delta = 0
     total_moves = 0
     total_moves_delta = 0
+    nr = len(games)
     while True:
-        moves, result = play_game(game, players, FLAGS.board)
-        total_moves += moves
+        allmoves, results = play_game(games, players, FLAGS.board)
+        for moves in allmoves:
+            total_moves += moves
         if FLAGS.board:
+            for result, moves in zip(results, allmoves):
+                if result == result.WIN:
+                    print("{} WIN".format(players[(moves - 1) % 2].str))
+                else:
+                    print("TIE")
+        for result, moves in zip(results, allmoves):
             if result == result.WIN:
-                print("{} WIN".format(players[(moves - 1) % 2].str))
+                players[(moves - 1) % 2].score += 1.0
             else:
-                print("TIE")
-        if result == result.WIN:
-            players[(moves - 1) % 2].score += 1.0
-        else:
-            players[0].score += 0.5
-            players[1].score += 0.5
+                players[0].score += 0.5
+                players[1].score += 0.5
         a, b = players
         players = b, a
-        if games > 0 and games % summary_interval == 0:
-            print("* {:7}: ".format(games), end="")
+        if nr_games > 0 and nr_games % (nr * summary_interval) == 0:
+            print("* {:7}: ".format(nr_games), end="")
             for i in players:
                 score = i.score - i.score_delta
                 print("{} {:8}, ".format(i.str, score), end="")
                 i.score_delta = i.score
                 i.agent.info()
-            print("{:8}".format((total_moves - total_moves_delta) // (games - games_delta)), end="")
+            print("{:8}".format((total_moves - total_moves_delta) // \
+                    (nr_games - nr_games_delta)), end="")
             print("")
             sys.stdout.flush()
-            games_delta = games
+            nr_games_delta = nr_games
             total_moves_delta = total_moves
-        games += 1
+        nr_games += nr
 
 if __name__ == "__main__":
     tf.app.run()

@@ -129,87 +129,117 @@ class DqnAgent(Agent):
     state_self     = 0
     state_opponent = 1
     state_mask     = 2
-    def __init__(self, size, session):
-        super().__init__(size, session)
+    def __init__(self, size, session, threads):
+        super().__init__(size, session, threads)
         self.scope     = None
         self.test_mode = False
-        self.q_network = None
-        self.network_restored = False
         self.epsilon = 0.0
+        self.board = None
     def clear(self):
         super().clear()
+        self.buffered_move = None
         self.board = np.zeros((self.size, self.size), dtype = np.int32), \
                      np.zeros((self.size, self.size), dtype = np.int32), \
                      np.zeros((self.size, self.size), dtype = np.int32)
-        if self.network_restored == False:
-            assert(self.q_network != None)
-            self.q_network.restore()
-            self.network_restored = True
-    def init_network(self, path, ro = True):
-        self.q_network = Network(self.size, self.scope + '/q', self.session, ro)
     def update_state_(self, position, mover):
         mask = self.board[2]
         mover_board = self.board[mover]
         assert(mask[position] == 0.0 and mover_board[position] == 0.0)
         mask[position]  = 1.0
         mover_board[position] = 1.0
-    def select(self, input, network):
+    @staticmethod
+    def select(input, network):
         stacked = np.stack(input, axis = 0)
         pred, out = network.session.run([network.predictions,
                     network.legal_moves],
                     feed_dict = { network.input : stacked } )
         m = np.argmax(out, axis = 1)
         return m, out
-    def self_move(self):
+    def self_move(self, _):
         _, _, mask = self.board
         if random.uniform(0, 1) < self.epsilon:
             move = super().random_policy(mask)
         else:
-            inputs = [np.stack(self.board, axis = -1)]
-            m, _ = self.select(inputs, self.q_network)
-            move = m[0] // self.size, m[0] % self.size
+            assert(self.buffered_move != None)
+            move = self.buffered_move // self.size, self.buffered_move % self.size
+        self.buffered_move = None
         self.update_state_(move, DqnAgent.state_self)
         return move
-    def opponent_move(self, position):
+    def opponent_move(self, position, _):
         self.update_state_(position, DqnAgent.state_opponent)
 
-class DqntrainAgent(DqnAgent):
-    def __init__(self, size, session):
-        super().__init__(size, session)
+class DqntrainAgentOne(DqnAgent):
+    def __init__(self, size, session, threads):
+        super().__init__(size, session, threads)
         self.game_queue = []
-        self.replay = deque()
-        self.scope = FLAGS.train_generation
-        self.nr_games = 0
-        self.losses = []
-        self.epsilon = FLAGS.train_epsilon
-        if not self.test_mode:
-            self.init_network()
+        self.clear()
     def clear(self):
         super().clear()
         self.opponent_mv = None
         self.self_mv = None
         self.orig_board = None
-    def init_network(self):
-        super().init_network(self.scope, ro = False)
-        self.target_network = Network(self.size, self.scope + '/target', self.session)
-        self.copy_network = CopyNetwork(self.q_network, self.target_network)
-
-    def name(self):
-        return "@"
     def append_replay_buf(self, orig, self_mv, opponent_mv, new, reward, endgame):
         self.game_queue.append((orig, self_mv, opponent_mv, new, reward, endgame))
-    def self_move(self):
+    def self_move(self, thread):
         a, b, c = self.board
         new_board = a.copy(), b.copy(), c.copy()
         if self.orig_board:
             self.append_replay_buf(self.orig_board, self.self_mv,
                     self.opponent_mv, new_board, 0.0, False)
         self.orig_board = new_board
-        self.self_mv = super().self_move()
+        self.self_mv = super().self_move(thread)
         return self.self_mv
-    def opponent_move(self, move):
-        super().opponent_move(move)
+    def opponent_move(self, move, thread):
+        super().opponent_move(move, thread)
         self.opponent_mv = move
+    def finish(self, reward, thread):
+        a, b, c = self.board
+        new_board = a.copy(), b.copy(), c.copy()
+        if self.orig_board:
+            self.append_replay_buf(self.orig_board, self.self_mv,
+                self.opponent_mv, new_board, reward, True)
+
+class DqntrainAgent(Agent):
+    def __init__(self, size, session, threads):
+        super().__init__(size, session, threads)
+        self.replay = deque()
+        self.scope = FLAGS.train_generation
+        self.nr_games = 0
+        self.losses = []
+        self.epsilon = FLAGS.train_epsilon
+        self.q_network = Network(self.size, self.scope + '/q', self.session)
+        self.target_network = Network(self.size, self.scope + '/target',
+                self.session)
+        self.copy_network = CopyNetwork(self.q_network, self.target_network)
+        self.children = []
+        for _ in range(threads):
+            self.children.append(DqntrainAgentOne(size, session, 0))
+        self.network_restored = False
+    def clear(self):
+        super().clear()
+        for child in self.children:
+            child.clear()
+        if self.network_restored == False:
+            assert(self.q_network != None)
+            self.q_network.restore()
+            self.network_restored = True
+    def name(self):
+        return "@"
+    def self_move(self, thread):
+        agent = self.children[thread]
+        if agent.buffered_move == None:
+            inputs = []
+            for i in self.children:
+                inputs.append(np.stack(i.board, axis = -1))
+            m, _ = DqnAgent.select(inputs, self.q_network)
+            for a, move in zip(self.children, m):
+                assert(move != None)
+                a.buffered_move = move
+        assert(agent.buffered_move != None)
+        return agent.self_move(thread)
+    def opponent_move(self, move, thread):
+        agent = self.children[thread]
+        agent.opponent_move(move, thread)
     def train_step(self):
         samples = random.sample(self.replay, FLAGS.samplesize)
         weights = list(map(lambda s: s[6], samples))
@@ -231,8 +261,8 @@ class DqntrainAgent(DqnAgent):
             orig.append(np.stack(orig_board, axis = -1))
             actions.append(self_mv)
             rewards.append(reward)
-        move, _ = self.select(inputs, self.q_network)
-        _, outtgt = self.select(inputs, self.target_network)
+        move, _ = DqnAgent.select(inputs, self.q_network)
+        _, outtgt = DqnAgent.select(inputs, self.target_network)
         best = np.array(ends) * outtgt[range(len(move)), move]
         outtgt = rewards + best * FLAGS.gamma
 
@@ -249,15 +279,13 @@ class DqntrainAgent(DqnAgent):
             print("New Epsilon {}".format(self.epsilon))
         self.losses.append(loss)
 
-    def finish(self, reward):
-        a, b, c = self.board
-        new_board = a.copy(), b.copy(), c.copy()
-        if self.orig_board:
-            self.append_replay_buf(self.orig_board, self.self_mv,
-                self.opponent_mv, new_board, reward, True)
+    def finish(self, reward, thread):
+        agent = self.children[thread]
+        agent.finish(reward, thread)
         weight = 1.0
-        while len(self.game_queue) > 0:
-            a,b,c,d,e,f = self.game_queue.pop()
+        queue = agent.game_queue
+        while len(queue) > 0:
+            a,b,c,d,e,f = queue.pop()
             self.replay.append((a, b, c, d, e, f, weight))
             weight *= FLAGS.sample_weight
             if len(self.replay) > FLAGS.replay_size:
@@ -268,6 +296,7 @@ class DqntrainAgent(DqnAgent):
         if self.nr_games % FLAGS.copy_network_interval == 0:
             self.copy_network.copy(self.session)
         self.nr_games += 1
+
     def info(self):
         if not self.losses:
             return
@@ -275,34 +304,61 @@ class DqntrainAgent(DqnAgent):
         self.losses = []
 
 class DqntestAgentOne(DqnAgent):
-    def __init__(self, size, session, scope):
-        super().__init__(size, session)
-        self.scope = scope
+    def __init__(self, size, session, threads):
+        super().__init__(size, session, 0)
         self.epsilon = FLAGS.test_epsilon
-        self.init_network(self.scope, ro = True)
+        self.q_network = None
+    def init_network(self, network):
+        self.q_network = network
     def name(self):
         return "#"
 
 class DqntestAgent(Agent):
-    def __init__(self, size, session):
-        super().__init__(size, session)
+    def __init__(self, size, session, threads):
+        super().__init__(size, session, threads)
         self.scopes = FLAGS.test_generation.split(",")
         self.agents = []
-        for scope in self.scopes:
-            self.agents.append(DqntestAgentOne(size, session, scope))
+        self.networks = []
+        for i, scope in enumerate(self.scopes):
+            self.agents.append([])
+            q_network = Network(self.size, scope + '/q', self.session, True)
+            self.networks.append(q_network)
+            for _ in range(self.threads):
+                agent = DqntestAgentOne(size, session, 0)
+                agent.init_network(q_network)
+                self.agents[i].append(agent)
+        self.active = None
+        self.network_restored = False
     def name(self):
         return "#"
-    def opponent_move(self, position):
-        self.active.opponent_move(position)
-    def self_move(self):
-        return self.active.self_move()
-    def finish(self, result):
-        active = self.active
-        return self.active.finish(result)
+    def opponent_move(self, position, thread):
+        agent = self.active[thread]
+        agent.opponent_move(position, thread)
+    def self_move(self, thread):
+        agent = self.active[thread]
+        if agent.buffered_move == None:
+            inputs = []
+            for i in self.active:
+                inputs.append(np.stack(i.board, axis = -1))
+            m, _ = DqnAgent.select(inputs, agent.q_network)
+            for a, move in zip(self.active, m):
+                a.buffered_move = move
+        move = agent.self_move(thread)
+        agent.buffered_move = None
+        return move
+    def finish(self, result, thread):
+        agent = self.active[thread]
+        return agent.finish(result, thread)
     def clear(self):
         super().clear()
         self.active = random.sample(self.agents, 1)[0]
-        self.active.clear()
+        if self.active != None:
+            for agent in self.active:
+                agent.clear()
+        if self.network_restored == False:
+            for network in self.networks:
+                network.restore()
+            self.network_restored = True
     def info(self):
         pass
 
