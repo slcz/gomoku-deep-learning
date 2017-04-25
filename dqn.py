@@ -11,8 +11,10 @@ import numpy as np
 import os
 from collections import deque
 import random
+from SumTree import SumTree
 
 FLAGS = tf.app.flags.FLAGS
+tf.app.flags.DEFINE_string('summaries_dir', '/tmp/summaries', """summary dir""")
 tf.app.flags.DEFINE_string('model_dir', './saved_models',
         """Directory to save the trained models""")
 tf.app.flags.DEFINE_string('train_generation', None,
@@ -24,17 +26,17 @@ tf.app.flags.DEFINE_string('copy_from', None, """copy from model""")
 tf.app.flags.DEFINE_string('copy_to', None, """copy to model""")
 tf.app.flags.DEFINE_float('train_epsilon', 0.01, """epsilon greedy""")
 tf.app.flags.DEFINE_float('test_epsilon', 0.01, """epsilon greedy""")
-tf.app.flags.DEFINE_float('sample_weight', 0.7, """sampling weight""")
 tf.app.flags.DEFINE_float('epsilon_decay', 0.8, """epsilon decay rate""")
-tf.app.flags.DEFINE_integer('trainbatch', 64, """training batch size""")
-tf.app.flags.DEFINE_integer('samplesize', 128, """samples""")
+tf.app.flags.DEFINE_float('priority_weight', 1.0, """priority wieght 0-1""")
+tf.app.flags.DEFINE_integer('trainbatch', 128, """training batch size""")
 tf.app.flags.DEFINE_integer('replay_size', 1000000, """replay buffer size""")
 tf.app.flags.DEFINE_integer('train_iterations', 1, """training iterations""")
-tf.app.flags.DEFINE_integer('observations', 5000, """initial observations""")
+tf.app.flags.DEFINE_integer('train_interval', 1, """training interval""")
+tf.app.flags.DEFINE_integer('observations', 10000, """initial observations""")
 tf.app.flags.DEFINE_integer('save_interval', 5000, """intervals to save model""")
 tf.app.flags.DEFINE_integer('decay_interval', 10000, """intervals to epsilon decay""")
-tf.app.flags.DEFINE_float('gamma', 0.7, """gamma""")
-tf.app.flags.DEFINE_integer('copy_network_interval', 2000, """intervals to copy network from qnet to targetnet""")
+tf.app.flags.DEFINE_float('gamma', 0.9, """gamma""")
+tf.app.flags.DEFINE_integer('copy_network_interval', 8000, """intervals to copy network from qnet to targetnet""")
 
 class Network:
     def __init__(self, size, scope, session, readonly = True):
@@ -79,21 +81,24 @@ class Network:
         self.input = tf.placeholder(dtype = tf.float32,
                 shape = [None, self.size, self.size, 3],
                 name = "input")
-        self.y = tf.placeholder(shape = [None], dtype = tf.float32,
-                name = "y")
+        self.y = tf.placeholder(shape = [None], dtype = tf.float32, name = "y")
         self.actions = tf.placeholder(shape=[None, 2], dtype=tf.int32,
                 name = "actions")
         self.actions_flat = tf.reshape( \
                 tf.slice(self.actions, [0, 0], [-1, 1]) \
                 * self.size + tf.slice(self.actions, [0, 1], [-1, 1]), [-1])
 
-        conv1 = tf.contrib.layers.conv2d(self.input, 8, 3, 1,
-                activation_fn=tf.nn.relu)
-        conv2 = tf.contrib.layers.conv2d(conv1, 64, 5, 1,
-                activation_fn=tf.nn.relu)
-        flat= tf.contrib.layers.flatten(conv2)
-        fc1 = tf.contrib.layers.fully_connected(flat, 8 * flatsize)
-        self.predictions=tf.contrib.layers.fully_connected(fc1, flatsize)
+        self.conv1 = tf.contrib.layers.conv2d(self.input, 128, 5, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='conv1')
+        self.conv2 = tf.contrib.layers.conv2d(self.conv1, 128, 3, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='conv2')
+        self.conv3 = tf.contrib.layers.conv2d(self.conv2, 128, 3, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='conv3')
+        self.conv4 = tf.contrib.layers.conv2d(self.conv3, 128, 3, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='conv4')
+        self.conv5 = tf.contrib.layers.conv2d(self.conv4, 1, 1, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='onebyone')
+        self.predictions = tf.contrib.layers.flatten(self.conv5)
         samples = tf.shape(self.input)[0]
         masks = tf.reshape(tf.slice(self.input, [0, 0, 0, 2], [-1, -1, -1, 1]),
                 [samples, -1])
@@ -111,6 +116,26 @@ class Network:
         self.optimizer=tf.train.RMSPropOptimizer(FLAGS.learn_rate, 0.99)
         self.train = self.optimizer.minimize(self.loss,
                 global_step=tf.contrib.framework.get_global_step())
+        self.scores_input = tf.placeholder(dtype = tf.float32,
+                            shape = [None], name = "scores_input")
+        self.train_stage = tf.placeholder(dtype = tf.int32,
+                            shape = [None], name = "train_stage")
+    def create_summary(self):
+        tf.summary.scalar('loss', self.loss)
+        tf.summary.scalar('max loss', tf.reduce_max(self.losses))
+        tf.summary.scalar('scores', tf.reduce_mean(self.scores_input))
+        tf.summary.scalar('stage', tf.reduce_mean(tf.to_float(self.train_stage)))
+        for s in tf.trainable_variables():
+            if 'weights' in s.name and s.name.startswith(self.scope):
+                tf.summary.histogram(s.name, s)
+            if 'biases' in s.name and s.name.startswith(self.scope):
+                tf.summary.histogram(s.name, s)
+        tf.summary.histogram(self.conv1.name, self.conv1)
+        tf.summary.histogram(self.conv2.name, self.conv2)
+        tf.summary.histogram(self.conv3.name, self.conv3)
+        tf.summary.histogram(self.conv4.name, self.conv4)
+        tf.summary.histogram(self.input.name, self.input)
+        tf.summary.histogram(self.predictions.name, self.predictions)
 
 class CopyNetwork:
     def __init__(self, src, dst):
@@ -157,37 +182,53 @@ class DqnAgent(Agent):
         return m, out
     def self_move(self, _):
         _, _, mask = self.board
+        m, q = self.buffered_move
         if random.uniform(0, 1) < self.epsilon:
-            move = super().random_policy(mask)
+            x, y = move = super().random_policy(mask)
         else:
             assert(self.buffered_move != None)
-            move = self.buffered_move // self.size, self.buffered_move % self.size
+            x, y = move = m // self.size, m % self.size
+        q_value = q[x * self.size + y]
         self.buffered_move = None
         self.update_state_(move, DqnAgent.state_self)
-        return move
+        return move, q_value
     def opponent_move(self, position, _):
         self.update_state_(position, DqnAgent.state_opponent)
+
+class Experience:
+    def __init__(self, initial_board, self_mv, oppo_mv, new_board, reward, end, q, step):
+        self.initial_board = initial_board
+        self.self_move     = self_mv
+        self.opponent_move = oppo_mv
+        self.new_board     = new_board
+        self.reward        = reward
+        self.end           = end
+        self.q             = q
+        self.step          = step
 
 class DqntrainAgentOne(DqnAgent):
     def __init__(self, size, session, threads):
         super().__init__(size, session, threads)
-        self.game_queue = []
+        self.q = 0.0
+        self.experience_queue = []
         self.clear()
+        self.epsilon = FLAGS.train_epsilon
     def clear(self):
         super().clear()
         self.opponent_mv = None
         self.self_mv = None
         self.orig_board = None
-    def append_replay_buf(self, orig, self_mv, opponent_mv, new, reward, endgame):
-        self.game_queue.append((orig, self_mv, opponent_mv, new, reward, endgame))
+    def append_replay_buf(self, o, s_m, o_m, n, rew, end, q):
+        state = Experience(o, s_m, o_m, n, rew, end, q, 0)
+        self.experience_queue.append(state)
     def self_move(self, thread):
         a, b, c = self.board
         new_board = a.copy(), b.copy(), c.copy()
         if self.orig_board:
             self.append_replay_buf(self.orig_board, self.self_mv,
-                    self.opponent_mv, new_board, 0.0, False)
+                    self.opponent_mv, new_board, 0.0, False, self.q)
         self.orig_board = new_board
-        self.self_mv = super().self_move(thread)
+        self.self_mv, self.q = super().self_move(thread)
         return self.self_mv
     def opponent_move(self, move, thread):
         super().opponent_move(move, thread)
@@ -197,17 +238,22 @@ class DqntrainAgentOne(DqnAgent):
         new_board = a.copy(), b.copy(), c.copy()
         if self.orig_board:
             self.append_replay_buf(self.orig_board, self.self_mv,
-                self.opponent_mv, new_board, reward, True)
+                self.opponent_mv, new_board, reward, True, self.q)
 
 class DqntrainAgent(Agent):
     def __init__(self, size, session, threads):
         super().__init__(size, session, threads)
-        self.replay = deque()
+        self.replay = SumTree(FLAGS.replay_size)
+        self.scores = deque()
+        self.scores.append(0.0)
         self.scope = FLAGS.train_generation
         self.nr_games = 0
         self.losses = []
-        self.epsilon = FLAGS.train_epsilon
         self.q_network = Network(self.size, self.scope + '/q', self.session)
+        self.q_network.create_summary()
+        self.train_writer = tf.summary.FileWriter(
+                FLAGS.summaries_dir + '/train', session.graph)
+        self.merged = tf.summary.merge_all()
         self.target_network = Network(self.size, self.scope + '/target',
                 self.session)
         self.copy_network = CopyNetwork(self.q_network, self.target_network)
@@ -231,70 +277,96 @@ class DqntrainAgent(Agent):
             inputs = []
             for i in self.children:
                 inputs.append(np.stack(i.board, axis = -1))
-            m, _ = DqnAgent.select(inputs, self.q_network)
-            for a, move in zip(self.children, m):
+            m, Q = DqnAgent.select(inputs, self.q_network)
+            for a, move, q in zip(self.children, m, Q):
                 assert(move != None)
-                a.buffered_move = move
+                a.buffered_move = (move, q)
         assert(agent.buffered_move != None)
         return agent.self_move(thread)
     def opponent_move(self, move, thread):
         agent = self.children[thread]
         agent.opponent_move(move, thread)
     def train_step(self):
-        samples = random.sample(self.replay, FLAGS.samplesize)
-        weights = list(map(lambda s: s[6], samples))
-        tot = sum(weights)
-        prob = list(map(lambda s: s / tot, weights))
-        index = np.random.choice(range(FLAGS.samplesize),
-                size = FLAGS.trainbatch, p = prob)
-        mini_batch = [samples[i] for i in index]
+        total = self.replay.total()
+        mini_batch = []
+        for _ in range(FLAGS.trainbatch):
+            s = random.uniform(0.0, total)
+            mini_batch.append(self.replay.get(s))
 
-        inputs = []
-        ends = []
-        orig = []
+        inputs  = []
+        ends    = []
+        orig    = []
         actions = []
         rewards = []
-        for sample in mini_batch:
-            orig_board, self_mv, opponent_mv, new_board, reward, end, _ = sample
-            inputs.append(np.stack(new_board, axis = -1))
-            ends.append(1 - end)
-            orig.append(np.stack(orig_board, axis = -1))
-            actions.append(self_mv)
-            rewards.append(reward)
+        stages  = []
+        for idx, prio, sample in mini_batch:
+            assert(sample.q == prio)
+            inputs.append(np.stack(sample.new_board, axis = -1))
+            ends.append(1 - sample.end)
+            orig.append(np.stack(sample.initial_board, axis = -1))
+            actions.append(sample.self_move)
+            rewards.append(sample.reward)
+            stages.append(sample.step)
         move, _ = DqnAgent.select(inputs, self.q_network)
         _, outtgt = DqnAgent.select(inputs, self.target_network)
         best = np.array(ends) * outtgt[range(len(move)), move]
         outtgt = rewards + best * FLAGS.gamma
 
+        origmove, outorig = DqnAgent.select(orig, self.q_network)
+        q = outorig[range(len(origmove)), origmove]
+        newq = np.power(np.absolute(q - outtgt) + 0.00001, FLAGS.priority_weight)
+        acc = 0.0
+        for (i, (idx, _, data)) in enumerate(mini_batch):
+            p = newq[i]
+            data.q = p
+            self.replay.update(idx, p)
+            acc += p
+
         step_var = tf.contrib.framework.get_global_step()
-        _, loss, steps = self.q_network.session.run(
-                [self.q_network.train, self.q_network.loss, step_var],
+        summary, _, loss, steps = self.q_network.session.run(
+                [self.merged, self.q_network.train,
+                    self.q_network.loss, step_var],
                 feed_dict = { self.q_network.input : orig,
                               self.q_network.y : outtgt,
-                              self.q_network.actions : actions } )
+                              self.q_network.actions : actions,
+                              self.q_network.scores_input : self.scores,
+                              self.q_network.train_stage : stages})
+        if steps > 0 and steps % 10 == 0:
+            self.train_writer.add_summary(summary, steps)
         if steps > 0 and steps % FLAGS.save_interval == 0:
             self.q_network.save()
         if steps > 0 and steps % FLAGS.decay_interval == 0:
-            self.epsilon *= FLAGS.epsilon_decay
-            print("New Epsilon {}".format(self.epsilon))
+            for child in self.children:
+                child.epsilon *= FLAGS.epsilon_decay
+            print("New Epsilon {}".format(self.children[0].epsilon))
         self.losses.append(loss)
 
     def finish(self, reward, thread):
+        self.scores.append(reward)
+        if len(self.scores) > 1000:
+            self.scores.popleft()
+
         agent = self.children[thread]
         agent.finish(reward, thread)
-        weight = 1.0
-        queue = agent.game_queue
+        queue = agent.experience_queue
+        for i, elem in enumerate(queue):
+            q = elem.q
+            if elem.end:
+                qn = elem.reward
+            else:
+                qn = queue[i + 1].q * FLAGS.gamma
+            elem.q = pow(abs(q - qn) + 0.00001, FLAGS.priority_weight)
+            elem.step = len(queue) - i
         while len(queue) > 0:
-            a,b,c,d,e,f = queue.pop()
-            self.replay.append((a, b, c, d, e, f, weight))
-            weight *= FLAGS.sample_weight
-            if len(self.replay) > FLAGS.replay_size:
-                self.replay.popleft()
-        if self.nr_games > FLAGS.observations:
+            elem = queue.pop()
+            self.replay.add(elem.q, elem)
+        if self.nr_games > FLAGS.observations and \
+           self.nr_games % FLAGS.train_interval == 0:
             for _ in range(FLAGS.train_iterations):
                 self.train_step()
         if self.nr_games % FLAGS.copy_network_interval == 0:
             self.copy_network.copy(self.session)
+            print("copy to target network")
         self.nr_games += 1
 
     def info(self):
@@ -340,10 +412,10 @@ class DqntestAgent(Agent):
             inputs = []
             for i in self.active:
                 inputs.append(np.stack(i.board, axis = -1))
-            m, _ = DqnAgent.select(inputs, agent.q_network)
-            for a, move in zip(self.active, m):
-                a.buffered_move = move
-        move = agent.self_move(thread)
+            m, Q = DqnAgent.select(inputs, agent.q_network)
+            for a, move, q in zip(self.active, m, Q):
+                a.buffered_move = (move, q)
+        move, _ = agent.self_move(thread)
         agent.buffered_move = None
         return move
     def finish(self, result, thread):

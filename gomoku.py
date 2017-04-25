@@ -177,7 +177,7 @@ def main(argv=None):
     if FLAGS.board:
         summary_interval = 1
     else:
-        summary_interval = 16
+        summary_interval = 1024
 
     nr_games = 0
     nr_games_delta = 0
@@ -202,7 +202,7 @@ def main(argv=None):
                 players[1].score += 0.5
         a, b = players
         players = b, a
-        if nr_games > 0 and nr_games % (nr * summary_interval) == 0:
+        if nr_games > 0 and nr_games % (summary_interval / nr * nr) == 0:
             print("* {:7}: ".format(nr_games), end="")
             for i in players:
                 score = i.score - i.score_delta
