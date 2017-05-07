@@ -97,7 +97,7 @@ class Network:
         self.conv4 = tf.contrib.layers.conv2d(self.conv3, 128, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv4')
         self.conv5 = tf.contrib.layers.conv2d(self.conv4, 1, 1, 1,
-                activation_fn=tf.nn.relu, padding='SAME', scope='onebyone')
+                activation_fn=None, padding='SAME', scope='onebyone')
         self.predictions = tf.contrib.layers.flatten(self.conv5)
         samples = tf.shape(self.input)[0]
         masks = tf.reshape(tf.slice(self.input, [0, 0, 0, 2], [-1, -1, -1, 1]),
