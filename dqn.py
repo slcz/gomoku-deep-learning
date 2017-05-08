@@ -341,6 +341,10 @@ class DqntrainAgent(Agent):
             print("New Epsilon {}".format(self.children[0].epsilon))
         self.losses.append(loss)
 
+    def gameend(self):
+        print("Saving latest parameters")
+        self.q_network.save()
+
     def finish(self, reward, thread):
         self.scores.append(reward)
         if len(self.scores) > 1000:
