@@ -6,6 +6,20 @@ import tensorflow as tf
 from agent import (Agent, HumanAgent, RandomAgent)
 from dqn import (DqntrainAgent, DqntestAgent, CloneNetworks)
 import sys
+from collections import deque
+
+FLAGS=tf.app.flags.FLAGS
+tf.app.flags.DEFINE_string('agent1', 'random', "agent 1")
+tf.app.flags.DEFINE_string('agent2', 'random', "agent 2")
+tf.app.flags.DEFINE_boolean('board', False, "display board")
+tf.app.flags.DEFINE_integer('boardsize', 9, "board size")
+tf.app.flags.DEFINE_integer('connections', 5, "connected stones to win")
+tf.app.flags.DEFINE_boolean('clone', False, "clone networks")
+tf.app.flags.DEFINE_integer('concurrency', 1, "concurrency")
+tf.app.flags.DEFINE_float('stop_rate', 0.98, """win rate of agent 1 threshold to stop training""")
+tf.app.flags.DEFINE_integer('max_games', 1000000, """maximum number of games""")
+tf.app.flags.DEFINE_integer('min_games',  20000, """minimum number of games""")
+tf.app.flags.DEFINE_integer('check_stop', 1000, """interval to check stop condition""")
 
 class Result(Enum):
     WIN      = 0
@@ -134,15 +148,6 @@ class Player:
         self.score = 0.0
         self.score_delta = 0.0
 
-FLAGS=tf.app.flags.FLAGS
-tf.app.flags.DEFINE_string('agent1', 'random', "agent 1")
-tf.app.flags.DEFINE_string('agent2', 'random', "agent 2")
-tf.app.flags.DEFINE_boolean('board', False, "display board")
-tf.app.flags.DEFINE_integer('boardsize', 9, "board size")
-tf.app.flags.DEFINE_integer('connections', 5, "connected stones to win")
-tf.app.flags.DEFINE_boolean('clone', False, "clone networks")
-tf.app.flags.DEFINE_integer('concurrency', 1, "concurrency")
-
 def main(argv=None):
     tf.logging.set_verbosity(tf.logging.ERROR)
     sess = tf.Session()
@@ -179,12 +184,15 @@ def main(argv=None):
     else:
         summary_interval = 1024
 
+    latest_games = deque()
     nr_games = 0
     nr_games_delta = 0
     total_moves = 0
     total_moves_delta = 0
     nr = len(games)
-    while True:
+    threshold = False
+    while nr_games < FLAGS.min_games or \
+          (nr_games < FLAGS.max_games and not threshold):
         allmoves, results = play_game(games, players, FLAGS.board)
         for moves in allmoves:
             total_moves += moves
@@ -197,9 +205,19 @@ def main(argv=None):
         for result, moves in zip(results, allmoves):
             if result == result.WIN:
                 players[(moves - 1) % 2].score += 1.0
+                if players[(moves - 1) % 2].agent.name() == "@":
+                    latest_games.append(1.0)
+                else:
+                    latest_games.append(0.0)
             else:
                 players[0].score += 0.5
                 players[1].score += 0.5
+                latest_games.append(0.5)
+        if len(latest_games) > FLAGS.check_stop:
+            while len(latest_games) > FLAGS.check_stop:
+                latest_games.popleft()
+            if sum(latest_games) / FLAGS.check_stop >= FLAGS.stop_rate:
+                threshold = True
         a, b = players
         players = b, a
         if nr_games > 0 and nr_games % (summary_interval / nr * nr) == 0:
@@ -216,6 +234,21 @@ def main(argv=None):
             nr_games_delta = nr_games
             total_moves_delta = total_moves
         nr_games += nr
+    print("* {:7}: ".format(nr_games), end="")
+    for i in players:
+        score = i.score - i.score_delta
+        print("{} {:8}, ".format(i.str, score), end="")
+        i.score_delta = i.score
+        i.agent.info()
+    if nr_games_delta == 0:
+        nr_games_delta = 1
+    print("{:8}".format((total_moves - total_moves_delta) // \
+            (nr_games - nr_games_delta)), end="")
+    print("")
+    sys.stdout.flush()
+
+    for player in players:
+        player.agent.gameend()
 
 if __name__ == "__main__":
     tf.app.run()

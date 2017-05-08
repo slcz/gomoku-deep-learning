@@ -12,6 +12,8 @@ class Agent:
         pass
     def finish(self, result, thread):
         pass
+    def gameend(self):
+        pass
     def clear(self):
         pass
     def name(self):
