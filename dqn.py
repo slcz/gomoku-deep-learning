@@ -21,7 +21,7 @@ tf.app.flags.DEFINE_string('train_generation', None,
         """train-model generation""")
 tf.app.flags.DEFINE_string('test_generation', None,
         """test-model generation""")
-tf.app.flags.DEFINE_float('learn_rate', 0.0005, """learning rate""")
+tf.app.flags.DEFINE_float('learn_rate', 0.0002, """learning rate""")
 tf.app.flags.DEFINE_string('copy_from', None, """copy from model""")
 tf.app.flags.DEFINE_string('copy_to', None, """copy to model""")
 tf.app.flags.DEFINE_float('train_epsilon', 0.1, """epsilon greedy""")

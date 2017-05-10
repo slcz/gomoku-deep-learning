@@ -66,11 +66,11 @@ class HumanAgent(Agent):
         assert(thread == 0)
         x, y = None, None
         while True:
-            move_str = input("enter your move e.g. a1:")
+            move_str = input("enter your move e.g. aA:")
             if len(move_str) != 2:
                 continue
             x = ord(move_str[0]) - ord('a')
-            y = ord(move_str[1]) - ord('1')
+            y = ord(move_str[1]) - ord('A')
             if x >= 0 and x < self.size and y >= 0 and y < self.size \
                     and not self.board[x, y]:
                 break
