@@ -88,17 +88,23 @@ class Network:
                 tf.slice(self.actions, [0, 0], [-1, 1]) \
                 * self.size + tf.slice(self.actions, [0, 1], [-1, 1]), [-1])
 
-        self.conv1 = tf.contrib.layers.conv2d(self.input, 128, 5, 1,
+        self.conv1 = tf.contrib.layers.conv2d(self.input, 256, 5, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv1')
-        self.conv2 = tf.contrib.layers.conv2d(self.conv1, 128, 3, 1,
+        self.conv2 = tf.contrib.layers.conv2d(self.conv1, 256, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv2')
-        self.conv3 = tf.contrib.layers.conv2d(self.conv2, 128, 3, 1,
+        self.conv3 = tf.contrib.layers.conv2d(self.conv2, 256, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv3')
-        self.conv4 = tf.contrib.layers.conv2d(self.conv3, 128, 3, 1,
+        self.conv4 = tf.contrib.layers.conv2d(self.conv3, 256, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv4')
-        self.conv5 = tf.contrib.layers.conv2d(self.conv4, 1, 1, 1,
+        self.conv5 = tf.contrib.layers.conv2d(self.conv4, 256, 3, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='conv5')
+        self.conv6 = tf.contrib.layers.conv2d(self.conv5, 256, 3, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='conv6')
+        self.conv7 = tf.contrib.layers.conv2d(self.conv6, 256, 3, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='conv7')
+        self.conv8 = tf.contrib.layers.conv2d(self.conv7, 1, 1, 1,
                 activation_fn=None, padding='SAME', scope='onebyone')
-        self.predictions = tf.contrib.layers.flatten(self.conv5)
+        self.predictions = tf.contrib.layers.flatten(self.conv8)
         samples = tf.shape(self.input)[0]
         masks = tf.reshape(tf.slice(self.input, [0, 0, 0, 2], [-1, -1, -1, 1]),
                 [samples, -1])
@@ -134,6 +140,9 @@ class Network:
         tf.summary.histogram(self.conv2.name, self.conv2)
         tf.summary.histogram(self.conv3.name, self.conv3)
         tf.summary.histogram(self.conv4.name, self.conv4)
+        tf.summary.histogram(self.conv5.name, self.conv5)
+        tf.summary.histogram(self.conv5.name, self.conv6)
+        tf.summary.histogram(self.conv5.name, self.conv7)
         tf.summary.histogram(self.input.name, self.input)
         tf.summary.histogram(self.predictions.name, self.predictions)
 

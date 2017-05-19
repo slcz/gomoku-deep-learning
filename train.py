@@ -8,7 +8,7 @@ from subprocess import call
 def train():
     parser = OptionParser()
     parser.add_option("-n", "--test_models", dest="nmodels", type=int,
-            default=8, help="number of test model each iterations")
+            default=1, help="number of test model each iterations")
     parser.add_option("-d", "--directory", dest="directory",
             default="saved_models", help="model directory")
     (options, _) = parser.parse_args()
@@ -26,14 +26,14 @@ def train():
         print()
         print("***** NEW  GENERATION {} *****".format(new_model))
         print()
-        command = ["./gomoku.py", "--agent1", "dqntrain", "--agent2", "random", "--train_generation", new_model, "--concurrency", "512"]
+        command = ["./gomoku.py", "--agent1", "dqntrain", "--agent2", "random", "--train_generation", new_model, "--concurrency", "1024", "check_stop", "4096"]
         call(command)
         return
 
     command = ["./gomoku.py", "--clone", "--copy_from", models[-1], "--copy_to", new_model]
     call(command)
 
-    weights = [1 / x for x in range(1, n + 1)]
+    weights = [1 / (2 ** x) for x in range(1, n + 1)]
     w = sum(weights)
     weights = list(reversed(list(map(lambda x: x / w, weights))))
     if (n < options.nmodels):
