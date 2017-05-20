@@ -12,7 +12,7 @@ FLAGS=tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('agent1', 'random', "agent 1")
 tf.app.flags.DEFINE_string('agent2', 'random', "agent 2")
 tf.app.flags.DEFINE_boolean('board', False, "display board")
-tf.app.flags.DEFINE_integer('boardsize', 15, "board size")
+tf.app.flags.DEFINE_integer('boardsize', 9, "board size")
 tf.app.flags.DEFINE_integer('connections', 5, "connected stones to win")
 tf.app.flags.DEFINE_boolean('clone', False, "clone networks")
 tf.app.flags.DEFINE_integer('concurrency', 1, "concurrency")
