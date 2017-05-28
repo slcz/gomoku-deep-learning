@@ -12,6 +12,7 @@ import os
 from collections import deque
 import random
 from SumTree import SumTree
+import math
 
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('summaries_dir', '/tmp/summaries', """summary dir""")
@@ -37,6 +38,9 @@ tf.app.flags.DEFINE_integer('save_interval', 5000, """intervals to save model"""
 tf.app.flags.DEFINE_integer('decay_interval', 10000, """intervals to epsilon decay""")
 tf.app.flags.DEFINE_float('gamma', 0.9, """gamma""")
 tf.app.flags.DEFINE_integer('copy_network_interval', 8000, """intervals to copy network from qnet to targetnet""")
+tf.app.flags.DEFINE_integer('montecarlo_parallelism', 1024, """Monte Carlo execution agents""")
+tf.app.flags.DEFINE_integer('montecarlo_totalsteps', 4194304, """Monte Carlo time limitation""")
+tf.app.flags.DEFINE_float('uct_exploration', 0.05, """UCT exploration parameter""")
 
 class Network:
     def __init__(self, size, scope, session, readonly = True):
@@ -387,6 +391,230 @@ class DqntrainAgent(Agent):
             return
         print(" loss = {:.3f} ".format(sum(self.losses) / len(self.losses)), end="")
         self.losses = []
+
+class MonteCarloTree:
+    def __init__(self, size):
+        self.size = size
+        self.slots = size ** 2
+        self.children = []
+        for _ in range(self.slots):
+            self.children.append(None)
+        self.reward = 0.0
+        self.total  = 0.0
+    #
+    # using UCT formula, evaluation each possible next move.
+    # returns the position of the best valuation.
+    #
+    def select(self, mask):
+        evaluations = np.zeros(self.slots)
+        for i in range(self.slots):
+            if mask[i]:
+                value = 0.0
+            elif self.children[i] == None or self.children[i].total == 0.0:
+                value = float("inf")
+            else:
+                c = self.children[i]
+                value = c.reward / c.total + FLAGS.uct_exploration \
+                        * math.sqrt(math.log(self.total) / c.total)
+            evaluations[i] = value
+        seq = np.random.permutation(self.slots)
+        e = evaluations[seq]
+        pos = seq[np.argmax(e)]
+        assert(np.amax(evaluations) == evaluations[pos])
+        return pos
+
+class MonteCarloExploer:
+    state_init            = 0
+    state_select          = 1
+    state_simulation      = 2
+    state_backpropagation = 3
+    state_waitfor_move    = 4
+    def __init__(self, size, board, tree):
+        self.size  = size
+        self.tree  = tree
+        self.orig  = board
+        self.reinitialize()
+
+    def reinitialize(self):
+        self.myturn = True
+        a, b = self.orig
+        self.board = a.copy(), b.copy(), a + b
+        self.state = MonteCarloExploer.state_select
+        self.trace = [self.tree]
+        self.termination = False
+        self.reward = 0.0
+        self.pending_state = None
+        self.move  = None
+        self.node = self.tree
+
+    def __bounds_check(self, position):
+        x, y = position
+        return x < 0 or y < 0 or x >= self.size or y >= self.size
+
+    def __check(self, board, x, y, dx, dy):
+        connected = 0
+        while True:
+            if self.__bounds_check((x, y)):
+                break
+            if board[x, y] == False:
+                break
+            connected += 1
+            x, y = x - dx, y - dy
+        return connected
+
+    def check(self, position, direction):
+        x, y = position
+        dx, dy = direction
+        board = self.board[0]
+        connected =  self.__check(board, x, y, dx, dy)
+        connected += self.__check(board, x, y, -dx, -dy)
+        return connected - 1
+
+    def checkwin(self, move):
+        for direction in ((1,0), (0,1), (1,1), (1, -1)):
+            if self.check(move, direction) >= FLAGS.connections:
+                return True
+        return False
+
+    def step(self):
+        return_value = 0
+        if self.state == MonteCarloExploer.state_select:
+            fst, snd, m = self.board
+            mask = m.ravel()
+            move = self.node.select(mask)
+            x, y = move // self.size, move % self.size
+            assert(fst[(x, y)] == False and m[(x, y)] == False)
+            fst[x, y] = True
+            m[x, y] = True
+            if self.checkwin((x, y)):
+                if self.myturn:
+                    self.reward = 1.0
+                else:
+                    self.reward = 0.0
+                self.termination = True
+            if np.all(m):
+                self.reward = 0.5
+                self.termination = True
+            expand = False
+            if self.node.children[move] == None:
+                # expand
+                self.node.children[move] = MonteCarloTree(self.size)
+                expand = True
+            self.trace.append(self.node.children[move])
+            self.node = self.node.children[move]
+            if self.termination == True:
+                self.state = MonteCarloExploer.state_backpropagation
+            elif expand:
+                self.state = MonteCarloExploer.state_simulation
+            else:
+                self.state = MonteCarloExploer.state_select
+            self.board = snd, fst, m
+            self.myturn = not self.myturn
+        elif self.state == MonteCarloExploer.state_backpropagation:
+            self.trace.reverse()
+            for i in self.trace:
+                i.reward += self.reward
+                i.total  += 1.0
+            self.state = MonteCarloExploer.state_select
+            self.reinitialize()
+        elif self.state == MonteCarloExploer.state_simulation:
+            self.pending_state = np.stack(self.board, axis = -1)
+            self.move  = None
+            self.state = MonteCarloExploer.state_waitfor_move
+            return_value = 1
+        elif self.state == MonteCarloExploer.state_waitfor_move:
+            if self.move != None:
+                fst, snd, m = self.board
+                if random.random() < FLAGS.test_epsilon:
+                    while True:
+                        m = self.board[0] + self.board[1]
+                        move = random.randint(0, self.size ** 2 - 1)
+                        move = move // self.size, move % self.size
+                        if m[move] == False:
+                            break
+                else:
+                    move = self.move // self.size, self.move % self.size
+                self.move = None
+                fst[move] = True
+                m[move] = True
+                termination = False
+                if self.checkwin(move):
+                    termination = True
+                    if self.myturn:
+                        self.reward = 1.0
+                    else:
+                        self.reward = 0.0
+                if np.all(m):
+                    termination = True
+                    self.reward = 0.5
+                if termination:
+                    self.state = MonteCarloExploer.state_backpropagation
+                else:
+                    self.state = MonteCarloExploer.state_simulation
+                self.board = snd, fst, m
+                self.myturn = not self.myturn
+                self.pending_state = None
+        return return_value
+
+class MontecarloAgent(Agent):
+    def __init__(self, size, session, threads):
+        assert(threads == 1)
+        super().__init__(size, session, threads)
+        self.scope = FLAGS.test_generation
+        self.network = Network(self.size, self.scope + '/q', self.session, True)
+        self.network_restored = False
+        self.board = None
+    def clear(self):
+        super().clear()
+        if self.network_restored == False:
+            assert(self.network != None)
+            self.network.restore()
+            self.network_restored = True
+        self.board = []
+        self.board.append(np.zeros((self.size, self.size), dtype=np.bool_))
+        self.board.append(np.zeros((self.size, self.size), dtype=np.bool_))
+    def name(self):
+        return "#"
+    def self_move(self, thread):
+        tree = MonteCarloTree(self.size)
+        exploers = []
+        for _ in range(FLAGS.montecarlo_parallelism):
+            exploers.append(MonteCarloExploer(self.size, self.board, tree))
+        wait = 0
+        for i in range(FLAGS.montecarlo_totalsteps // FLAGS.montecarlo_parallelism):
+            if i % 100 == 0:
+                print(i * FLAGS.montecarlo_parallelism, FLAGS.montecarlo_totalsteps)
+            for exploer in exploers:
+                wait += exploer.step()
+                if wait >= FLAGS.montecarlo_parallelism:
+                    assert(wait == FLAGS.montecarlo_parallelism)
+                    inputs = []
+                    for e in exploers:
+                        assert(e.move == None)
+                        assert(e.pending_state is not None)
+                        inputs.append(e.pending_state)
+                        wait -= 1
+                    assert(wait == 0)
+                    moves, Q = DqnAgent.select(inputs, self.network)
+                    for m, e in zip(moves, exploers):
+                        assert(e.move == None)
+                        e.move = m
+        max = 0.0
+        move = None
+        tot = 0.0
+        for i, c in enumerate(tree.children):
+            if c == None:
+                continue
+            tot += c.total
+            if c.total > max:
+                max = c.total
+                move = i
+        assert(move != None)
+        move = move // self.size, move % self.size
+        self.board[0][move] = True
+        return move
+    def opponent_move(self, move, thread):
+        self.board[1][move] = True
 
 class DqntestAgentOne(DqnAgent):
     def __init__(self, size, session, threads):

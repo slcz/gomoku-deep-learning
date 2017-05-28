@@ -4,7 +4,7 @@ from enum import Enum
 import random
 import tensorflow as tf
 from agent import (Agent, HumanAgent, RandomAgent)
-from dqn import (DqntrainAgent, DqntestAgent, CloneNetworks)
+from dqn import (DqntrainAgent, DqntestAgent, MontecarloAgent, CloneNetworks)
 import sys
 from collections import deque
 
@@ -89,7 +89,7 @@ class Gomoku:
             print("{:2}".format(chr(ord('A') + x - 1)), end="")
         print()
         for x in range(1, self.size + 1):
-            print("{:2} ".format(chr(ord('a') + x - 1)), end="")
+            print("{:2}".format(chr(ord('a') + x - 1)), end="")
             for y in range(1, self.size + 1):
                 if self.fst_board[x - 1, y - 1]:
                     c = self.fst_str

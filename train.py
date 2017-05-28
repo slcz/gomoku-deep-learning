@@ -45,7 +45,7 @@ def train():
     print("***** NEW  GENERATION {} *****".format(new_model))
     print("*** TEST GENERATION {} ***".format(testgen))
     print()
-    command = ["./gomoku.py", "--agent1", "dqntrain", "--agent2", "dqntest", "--train_generation", new_model, "--test_generation", testgen, "--concurrency", "512"]
+    command = ["./gomoku.py", "--agent1", "dqntrain", "--agent2", "dqntest", "--train_generation", new_model, "--test_generation", testgen, "--concurrency", "512", "--boardsize", "15"]
     call(command)
 
 if __name__ == "__main__":
