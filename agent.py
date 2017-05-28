@@ -8,6 +8,8 @@ class Agent:
         self.threads = threads
     def opponent_move(self, position, thread):
         pass
+    def user_input(self, move):
+        pass
     def self_move(self, thread):
         pass
     def finish(self, result, thread):
@@ -76,3 +78,37 @@ class HumanAgent(Agent):
                 break
         self.board[x, y] = True
         return x, y
+
+class WebAgent(Agent):
+    def __init__(self, size, session, threads):
+        assert(threads == 1)
+        super().__init__(size, session, threads)
+        self.clear()
+    def clear(self):
+        self.board = np.zeros((self.size, self.size), dtype=np.bool_)
+        self.waiting = False
+        self.nextmove = None
+    def name(self):
+        return "w"
+    def opponent_move(self, position, thread):
+        assert(thread == 0)
+        x, y = position
+        assert not self.board[x, y]
+        self.board[x, y] = True
+    def user_input(self, move):
+        print(move)
+        if self.waiting:
+            x, y = move // self.size, move % self.size
+            if x >= 0 and x < self.size and y >= 0 and y < self.size \
+                    and not self.board[x, y]:
+                self.nextmove = x, y
+    def self_move(self, thread):
+        assert(thread == 0)
+        if self.nextmove != None:
+            x, y = self.nextmove
+            self.nextmove = None
+            self.board[x, y] = True
+            self.waiting = False
+            return x, y
+        else:
+            self.waiting = True

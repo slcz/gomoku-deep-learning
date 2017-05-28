@@ -3,12 +3,14 @@ import numpy as np
 from enum import Enum
 import random
 import tensorflow as tf
-from agent import (Agent, HumanAgent, RandomAgent)
+from agent import (Agent, HumanAgent, RandomAgent, WebAgent)
 from dqn import (DqntrainAgent, DqntestAgent, MontecarloAgent, CloneNetworks)
 import sys
 from collections import deque
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
 FLAGS=tf.app.flags.FLAGS
+tf.app.flags.DEFINE_boolean('web', False, "web interface")
 tf.app.flags.DEFINE_string('agent1', 'random', "agent 1")
 tf.app.flags.DEFINE_string('agent2', 'random', "agent 2")
 tf.app.flags.DEFINE_boolean('board', False, "display board")
@@ -25,6 +27,11 @@ class Result(Enum):
     WIN      = 0
     TIE      = 1
     CONTINUE = 2
+
+class WebSessionState(Enum):
+    START    = 0
+    INGAME   = 1
+    ENDGAME  = 2
 
 class Gomoku:
     def __init__(self, size, connection_to_win, players):
@@ -49,6 +56,7 @@ class Gomoku:
                 break
             if not board[x, y]:
                 break
+            self.connected.append(int(x * self.size + y))
             connected += 1
             x, y = x - dx, y - dy
         return connected
@@ -58,6 +66,7 @@ class Gomoku:
         return self.fst_board[x, y] or self.snd_board[x, y]
 
     def check(self, position, direction):
+        self.connected = []
         x, y = position
         dx, dy = direction
         if self.fst_board[x, y]:
@@ -76,6 +85,8 @@ class Gomoku:
         for direction in ((1,0), (0,1), (1,1), (1, -1)):
             if self.check(position, direction) >= self.win:
                 return Result.WIN
+            else:
+                self.connected = []
         if self.moves == self.size ** 2:
             return Result.TIE
         self.fst_board, self.snd_board = self.snd_board, self.fst_board
@@ -148,6 +159,83 @@ class Player:
         self.score = 0.0
         self.score_delta = 0.0
 
+app = Flask(__name__, static_url_path="", static_folder="static")
+
+web_context = None
+
+def web_context_init(games, players):
+    global web_context
+    assert(web_context == None)
+    web_context = {}
+    web_context['state' ] = WebSessionState.START
+    web_context['players'] = players
+    web_context['game'] = games[0]
+
+@app.route('/info')
+def info():
+    global web_context
+    r = web_context['game'].size
+    fst = web_context['game'].fst_board.ravel().tolist()
+    snd = web_context['game'].snd_board.ravel().tolist()
+    moves = web_context['game'].moves
+    return jsonify({"result": "accepted", "size": r, "fst": fst, "snd": snd, "moves": moves})
+
+@app.route('/next')
+def next_state():
+    global web_context
+    if request.method != 'GET':
+        return
+    if web_context['state'] == WebSessionState.START:
+        players = web_context['players']
+        web_context['game_players'] = players
+        for player in players:
+            player.agent.clear()
+        game = web_context['game']
+        game.clear((players[0].str, players[1].str))
+        web_context['state'] = WebSessionState.INGAME
+        r = {"result": "clear"}
+        return jsonify(r)
+    elif web_context['state'] == WebSessionState.INGAME:
+        players = web_context['game_players']
+        game = web_context['game']
+        a, b = players
+        move = a.agent.self_move(0)
+        if move == None:
+            r = {"result": "none"}
+            return jsonify(r)
+        b.agent.opponent_move(move, 0)
+        web_context['game_players'] = b, a
+        result = game.move(move)
+        if result == Result.WIN:
+            web_context['state'] = WebSessionState.ENDGAME
+        elif result == Result.TIE:
+            web_context['state'] = WebSessionState.ENDGAME
+        x, y = move
+        m = int(x), int(y)
+        r = {"result": "move", "move": m}
+        return jsonify(r)
+    elif web_context['state'] == WebSessionState.ENDGAME:
+        web_context['state'] = WebSessionState.START
+        a, b = web_context['players']
+        web_context['players'] = b, a
+        r = {"result": "end", "highlights": web_context['game'].connected}
+        return jsonify(r)
+
+@app.route('/move')
+def user_move():
+    if request.method != 'GET':
+        return
+    move = request.args.get('move')
+    players = web_context['game_players']
+    player = players[0]
+    player.agent.user_input(int(move))
+    r = {"result": "accepted"}
+    return jsonify(r)
+
+@app.route('/')
+def mainpage():
+    return render_template("interface.html")
+
 def main(argv=None):
     tf.logging.set_verbosity(tf.logging.ERROR)
     sess = tf.Session()
@@ -179,6 +267,10 @@ def main(argv=None):
     for i in range(FLAGS.concurrency):
         games.append(Gomoku(FLAGS.boardsize,
             FLAGS.connections, (players[0].str, players[1].str)))
+    if FLAGS.web:
+        web_context_init(games, players)
+        app.run(host="0.0.0.0", port=5000)
+        return
     if FLAGS.board:
         summary_interval = 1
     else:
