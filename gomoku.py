@@ -8,6 +8,7 @@ from dqn import (DqntrainAgent, DqntestAgent, MontecarloAgent, CloneNetworks)
 import sys
 from collections import deque
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from rules import Rules
 
 FLAGS=tf.app.flags.FLAGS
 tf.app.flags.DEFINE_boolean('web', False, "web interface")
@@ -38,6 +39,7 @@ class Gomoku:
         self.size = size
         self.win = connection_to_win
         self.clear(players)
+        self.rules = Rules(size, self.win)
 
     def clear(self, players):
         self.fst_board = np.zeros((self.size, self.size), dtype=np.bool_)
@@ -45,54 +47,24 @@ class Gomoku:
         self.fst_str, self.snd_str = players
         self.moves = 0
 
-    def __bounds_check(self, position):
-        x, y = position
-        return x < 0 or y < 0 or x >= self.size or y >= self.size
-
-    def __check(self, board, x, y, dx, dy):
-        connected = 0
-        while True:
-            if self.__bounds_check((x, y)):
-                break
-            if not board[x, y]:
-                break
-            self.connected.append(int(x * self.size + y))
-            connected += 1
-            x, y = x - dx, y - dy
-        return connected
-
     def occupied(self, position):
         x, y = position
         return self.fst_board[x, y] or self.snd_board[x, y]
-
-    def check(self, position, direction):
-        self.connected = []
-        x, y = position
-        dx, dy = direction
-        if self.fst_board[x, y]:
-            board = self.fst_board
-        elif self.snd_board[x, y]:
-            board =  self.snd_board
-        connected =  self.__check(board, x, y, dx, dy)
-        connected += self.__check(board, x, y, -dx, -dy)
-        return connected - 1
 
     def move(self, position):
         x, y = position
         assert not self.fst_board[x, y] and not self.snd_board[x, y]
         self.moves += 1
         self.fst_board[x, y] = True
-        for direction in ((1,0), (0,1), (1,1), (1, -1)):
-            if self.check(position, direction) >= self.win:
-                return Result.WIN
-            else:
-                self.connected = []
+        win, connections = self.rules.check_win(position, self.fst_board)
+        if win:
+                return Result.WIN, connections
         if self.moves == self.size ** 2:
-            return Result.TIE
+            return Result.TIE, []
         self.fst_board, self.snd_board = self.snd_board, self.fst_board
         self.fst_str, self.snd_str = self.snd_str, self.fst_str
 
-        return Result.CONTINUE
+        return Result.CONTINUE, None
 
     def print(self):
         print("  ", end="")
@@ -136,7 +108,7 @@ def play_game(games, players, display):
                 b.agent.opponent_move(move, i)
                 game_players[i] = b, a
                 a, b = game_players[i]
-                results[i] = game.move(move)
+                results[i], _ = game.move(move)
                 if display:
                     game.print()
                 moves[i] += 1
@@ -205,11 +177,13 @@ def next_state():
             return jsonify(r)
         b.agent.opponent_move(move, 0)
         web_context['game_players'] = b, a
-        result = game.move(move)
+        result, connections = game.move(move)
         if result == Result.WIN:
             web_context['state'] = WebSessionState.ENDGAME
+            web_context['connections'] = connections
         elif result == Result.TIE:
             web_context['state'] = WebSessionState.ENDGAME
+            web_context['connections'] = []
         x, y = move
         m = int(x), int(y)
         r = {"result": "move", "move": m}
@@ -218,7 +192,7 @@ def next_state():
         web_context['state'] = WebSessionState.START
         a, b = web_context['players']
         web_context['players'] = b, a
-        r = {"result": "end", "highlights": web_context['game'].connected}
+        r = {"result": "end", "highlights": web_context['connections']}
         return jsonify(r)
 
 @app.route('/move')

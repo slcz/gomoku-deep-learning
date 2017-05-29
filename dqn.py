@@ -6,6 +6,7 @@
 ################################################################################
 
 from agent import (Agent, RandomAgent)
+from rules import (Rules)
 import tensorflow as tf
 import numpy as np
 import os
@@ -433,6 +434,7 @@ class MonteCarloExploer:
         self.size  = size
         self.tree  = tree
         self.orig  = board
+        self.rules = Rules(size, FLAGS.connections)
         self.reinitialize()
 
     def reinitialize(self):
@@ -447,35 +449,6 @@ class MonteCarloExploer:
         self.move  = None
         self.node = self.tree
 
-    def __bounds_check(self, position):
-        x, y = position
-        return x < 0 or y < 0 or x >= self.size or y >= self.size
-
-    def __check(self, board, x, y, dx, dy):
-        connected = 0
-        while True:
-            if self.__bounds_check((x, y)):
-                break
-            if board[x, y] == False:
-                break
-            connected += 1
-            x, y = x - dx, y - dy
-        return connected
-
-    def check(self, position, direction):
-        x, y = position
-        dx, dy = direction
-        board = self.board[0]
-        connected =  self.__check(board, x, y, dx, dy)
-        connected += self.__check(board, x, y, -dx, -dy)
-        return connected - 1
-
-    def checkwin(self, move):
-        for direction in ((1,0), (0,1), (1,1), (1, -1)):
-            if self.check(move, direction) >= FLAGS.connections:
-                return True
-        return False
-
     def step(self):
         return_value = 0
         if self.state == MonteCarloExploer.state_select:
@@ -486,7 +459,8 @@ class MonteCarloExploer:
             assert(fst[(x, y)] == False and m[(x, y)] == False)
             fst[x, y] = True
             m[x, y] = True
-            if self.checkwin((x, y)):
+            win_condition, _ = self.rules.check_win((x, y), fst)
+            if win_condition:
                 if self.myturn:
                     self.reward = 1.0
                 else:
@@ -538,7 +512,8 @@ class MonteCarloExploer:
                 fst[move] = True
                 m[move] = True
                 termination = False
-                if self.checkwin(move):
+                win_condition, _ = self.rules.check_win(move, fst)
+                if win_condition:
                     termination = True
                     if self.myturn:
                         self.reward = 1.0
