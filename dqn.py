@@ -28,6 +28,7 @@ tf.app.flags.DEFINE_string('copy_from', None, """copy from model""")
 tf.app.flags.DEFINE_string('copy_to', None, """copy to model""")
 tf.app.flags.DEFINE_float('train_epsilon', 0.1, """epsilon greedy""")
 tf.app.flags.DEFINE_float('test_epsilon', 0.02, """epsilon greedy""")
+tf.app.flags.DEFINE_float('mcts_epsilon', 0.2, """epsilon greedy""")
 tf.app.flags.DEFINE_float('epsilon_decay', 0.8, """epsilon decay rate""")
 tf.app.flags.DEFINE_float('priority_weight', 1.0, """priority wieght 0-1""")
 tf.app.flags.DEFINE_integer('trainbatch', 256, """training batch size""")
@@ -39,8 +40,8 @@ tf.app.flags.DEFINE_integer('save_interval', 5000, """intervals to save model"""
 tf.app.flags.DEFINE_integer('decay_interval', 10000, """intervals to epsilon decay""")
 tf.app.flags.DEFINE_float('gamma', 0.9, """gamma""")
 tf.app.flags.DEFINE_integer('copy_network_interval', 8000, """intervals to copy network from qnet to targetnet""")
-tf.app.flags.DEFINE_integer('montecarlo_parallelism', 256, """Monte Carlo execution agents""")
-tf.app.flags.DEFINE_integer('montecarlo_totalsteps', 4096, """Monte Carlo time limitation""")
+tf.app.flags.DEFINE_integer('montecarlo_parallelism', 512, """Monte Carlo execution agents""")
+tf.app.flags.DEFINE_integer('montecarlo_totalsteps', 16384, """Monte Carlo time limitation""")
 tf.app.flags.DEFINE_integer('montecarlo_minsteps', 1024, """Monte Carlo time limitation""")
 tf.app.flags.DEFINE_float('uct_exploration', 0.2, """UCT exploration parameter""")
 
@@ -470,7 +471,7 @@ class MonteCarloExploer:
             self.nr_moves += 1
             win_condition, _ = self.rules.check_win((x, y), fst)
             if win_condition:
-                self.reward = 0.5 + 0.5 / self.nr_moves
+                self.reward = 1.0
                 self.termination = True
             if np.all(m):
                 self.reward = 0.5
@@ -506,7 +507,7 @@ class MonteCarloExploer:
         elif self.state == MonteCarloExploer.state_waitfor_move:
             if self.move != None:
                 fst, snd, m = self.board
-                if random.random() < FLAGS.test_epsilon:
+                if random.random() < FLAGS.mcts_epsilon:
                     while True:
                         m = self.board[0] + self.board[1]
                         move = random.randint(0, self.size ** 2 - 1)
@@ -522,7 +523,7 @@ class MonteCarloExploer:
                 termination = False
                 win_condition, _ = self.rules.check_win(move, fst)
                 if win_condition:
-                    self.reward = 0.5 + 0.5 / self.nr_moves
+                    self.reward = 1.0
                     termination = True
                 if np.all(m):
                     self.reward = 0.5
