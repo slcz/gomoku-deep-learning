@@ -30,7 +30,7 @@ tf.app.flags.DEFINE_float('train_epsilon', 0.1, """epsilon greedy""")
 tf.app.flags.DEFINE_float('test_epsilon', 0.02, """epsilon greedy""")
 tf.app.flags.DEFINE_float('epsilon_decay', 0.8, """epsilon decay rate""")
 tf.app.flags.DEFINE_float('priority_weight', 1.0, """priority wieght 0-1""")
-tf.app.flags.DEFINE_integer('trainbatch', 64, """training batch size""")
+tf.app.flags.DEFINE_integer('trainbatch', 256, """training batch size""")
 tf.app.flags.DEFINE_integer('replay_size', 1000000, """replay buffer size""")
 tf.app.flags.DEFINE_integer('train_iterations', 1, """training iterations""")
 tf.app.flags.DEFINE_integer('train_interval', 4, """training interval""")
@@ -39,9 +39,10 @@ tf.app.flags.DEFINE_integer('save_interval', 5000, """intervals to save model"""
 tf.app.flags.DEFINE_integer('decay_interval', 10000, """intervals to epsilon decay""")
 tf.app.flags.DEFINE_float('gamma', 0.9, """gamma""")
 tf.app.flags.DEFINE_integer('copy_network_interval', 8000, """intervals to copy network from qnet to targetnet""")
-tf.app.flags.DEFINE_integer('montecarlo_parallelism', 1024, """Monte Carlo execution agents""")
-tf.app.flags.DEFINE_integer('montecarlo_totalsteps', 4194304, """Monte Carlo time limitation""")
-tf.app.flags.DEFINE_float('uct_exploration', 0.05, """UCT exploration parameter""")
+tf.app.flags.DEFINE_integer('montecarlo_parallelism', 256, """Monte Carlo execution agents""")
+tf.app.flags.DEFINE_integer('montecarlo_totalsteps', 4096, """Monte Carlo time limitation""")
+tf.app.flags.DEFINE_integer('montecarlo_minsteps', 1024, """Monte Carlo time limitation""")
+tf.app.flags.DEFINE_float('uct_exploration', 0.2, """UCT exploration parameter""")
 
 class Network:
     def __init__(self, size, scope, session, readonly = True):
@@ -400,8 +401,10 @@ class MonteCarloTree:
         self.children = []
         for _ in range(self.slots):
             self.children.append(None)
-        self.reward = 0.0
         self.total  = 0.0
+        self.reward = 0.0
+        self.exploration  = 0.0
+        self.exploitation = 0.0
     #
     # using UCT formula, evaluation each possible next move.
     # returns the position of the best valuation.
@@ -415,8 +418,11 @@ class MonteCarloTree:
                 value = float("inf")
             else:
                 c = self.children[i]
-                value = c.reward / c.total + FLAGS.uct_exploration \
-                        * math.sqrt(math.log(self.total) / c.total)
+                v1 = c.reward / c.total
+                v2 = FLAGS.uct_exploration * math.sqrt(math.log(self.total) / c.total)
+                self.exploration += v2
+                self.exploitation += v1
+                value = v1 + v2
             evaluations[i] = value
         seq = np.random.permutation(self.slots)
         e = evaluations[seq]
@@ -435,10 +441,12 @@ class MonteCarloExploer:
         self.tree  = tree
         self.orig  = board
         self.rules = Rules(size, FLAGS.connections)
+        self.nr_moves = 0
         self.reinitialize()
 
     def reinitialize(self):
-        self.myturn = True
+        self.tree.total += 1.0
+        self.nr_moves = 0
         a, b = self.orig
         self.board = a.copy(), b.copy(), a + b
         self.state = MonteCarloExploer.state_select
@@ -459,12 +467,10 @@ class MonteCarloExploer:
             assert(fst[(x, y)] == False and m[(x, y)] == False)
             fst[x, y] = True
             m[x, y] = True
+            self.nr_moves += 1
             win_condition, _ = self.rules.check_win((x, y), fst)
             if win_condition:
-                if self.myturn:
-                    self.reward = 1.0
-                else:
-                    self.reward = 0.0
+                self.reward = 0.5 + 0.5 / self.nr_moves
                 self.termination = True
             if np.all(m):
                 self.reward = 0.5
@@ -476,6 +482,7 @@ class MonteCarloExploer:
                 expand = True
             self.trace.append(self.node.children[move])
             self.node = self.node.children[move]
+            self.node.total += 1.0
             if self.termination == True:
                 self.state = MonteCarloExploer.state_backpropagation
             elif expand:
@@ -483,12 +490,12 @@ class MonteCarloExploer:
             else:
                 self.state = MonteCarloExploer.state_select
             self.board = snd, fst, m
-            self.myturn = not self.myturn
         elif self.state == MonteCarloExploer.state_backpropagation:
-            self.trace.reverse()
+            if self.nr_moves % 2 == 1:
+                self.reward = 1.0 - self.reward
             for i in self.trace:
                 i.reward += self.reward
-                i.total  += 1.0
+                self.reward = 1.0 - self.reward
             self.state = MonteCarloExploer.state_select
             self.reinitialize()
         elif self.state == MonteCarloExploer.state_simulation:
@@ -511,24 +518,20 @@ class MonteCarloExploer:
                 self.move = None
                 fst[move] = True
                 m[move] = True
+                self.nr_moves += 1
                 termination = False
                 win_condition, _ = self.rules.check_win(move, fst)
                 if win_condition:
+                    self.reward = 0.5 + 0.5 / self.nr_moves
                     termination = True
-                    if self.myturn:
-                        self.reward = 1.0
-                    else:
-                        self.reward = 0.0
                 if np.all(m):
-                    termination = True
                     self.reward = 0.5
+                    termination = True
                 if termination:
                     self.state = MonteCarloExploer.state_backpropagation
                 else:
                     self.state = MonteCarloExploer.state_simulation
                 self.board = snd, fst, m
-                self.myturn = not self.myturn
-                self.pending_state = None
         return return_value
 
 class MontecarloAgent(Agent):
@@ -553,25 +556,32 @@ class MontecarloAgent(Agent):
     def self_move(self, thread):
         tree = MonteCarloTree(self.size)
         exploers = []
-        for _ in range(FLAGS.montecarlo_parallelism):
+        for i in range(FLAGS.montecarlo_parallelism):
             exploers.append(MonteCarloExploer(self.size, self.board, tree))
         wait = 0
-        for i in range(FLAGS.montecarlo_totalsteps // FLAGS.montecarlo_parallelism):
-            if i % 100 == 0:
-                print(i * FLAGS.montecarlo_parallelism, FLAGS.montecarlo_totalsteps)
+        games = 0
+        steps = 0
+        while games < FLAGS.montecarlo_totalsteps:
             for exploer in exploers:
                 wait += exploer.step()
-                if wait >= FLAGS.montecarlo_parallelism:
-                    assert(wait == FLAGS.montecarlo_parallelism)
+                if exploer.state == MonteCarloExploer.state_backpropagation:
+                    games += 1
+                    if games % 1000 == 0:
+                        print("games = {}".format(games))
+                steps += 1
+                if steps >= FLAGS.montecarlo_parallelism and wait > 0:
+                    steps = 0
                     inputs = []
+                    exp = []
                     for e in exploers:
-                        assert(e.move == None)
-                        assert(e.pending_state is not None)
-                        inputs.append(e.pending_state)
-                        wait -= 1
+                        if e.pending_state is not None:
+                            inputs.append(e.pending_state)
+                            exp.append(e)
+                            e.pending_state = None
+                            wait -= 1
                     assert(wait == 0)
                     moves, Q = DqnAgent.select(inputs, self.network)
-                    for m, e in zip(moves, exploers):
+                    for m, e in zip(moves, exp):
                         assert(e.move == None)
                         e.move = m
         max = 0.0
@@ -580,10 +590,11 @@ class MontecarloAgent(Agent):
         for i, c in enumerate(tree.children):
             if c == None:
                 continue
-            tot += c.total
+            print("{} {} rew = {} tot = {}".format(i // self.size, i % self.size, c.reward, c.total))
             if c.total > max:
                 max = c.total
                 move = i
+        print("exploitation = {} exploration = {}".format(tree.exploitation, tree.exploration))
         assert(move != None)
         move = move // self.size, move % self.size
         self.board[0][move] = True
