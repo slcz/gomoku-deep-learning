@@ -221,9 +221,9 @@ def main(argv=None):
         sys.exit(0)
     p1, p2 = players = (Player(), Player())
     i = 0
-    for p_ in FLAGS.agent1, FLAGS.agent2:
-        p = p_.capitalize() + 'Agent({}, {}, {})'.format(FLAGS.boardsize,
-                "sess", FLAGS.concurrency)
+    for a_, m_ in zip([FLAGS.agent1, FLAGS.agent2], [FLAGS.agent1_model, FLAGS.agent2_model]):
+        p = a_.capitalize() + 'Agent({}, {}, "{}", {})'.format(FLAGS.boardsize,
+                "sess", m_, FLAGS.concurrency)
         try:
             players[i].agent = eval(p)
         except (NameError, ValueError, SyntaxError):

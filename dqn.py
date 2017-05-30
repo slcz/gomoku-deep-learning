@@ -19,10 +19,8 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('summaries_dir', '/tmp/summaries', """summary dir""")
 tf.app.flags.DEFINE_string('model_dir', './saved_models',
         """Directory to save the trained models""")
-tf.app.flags.DEFINE_string('train_generation', None,
-        """train-model generation""")
-tf.app.flags.DEFINE_string('test_generation', None,
-        """test-model generation""")
+tf.app.flags.DEFINE_string('agent1_model', None, """agent1 model""")
+tf.app.flags.DEFINE_string('agent2_model', None, """agent2 model""")
 tf.app.flags.DEFINE_float('learn_rate', 0.0002, """learning rate""")
 tf.app.flags.DEFINE_string('copy_from', None, """copy from model""")
 tf.app.flags.DEFINE_string('copy_to', None, """copy to model""")
@@ -170,9 +168,8 @@ class DqnAgent(Agent):
     state_self     = 0
     state_opponent = 1
     state_mask     = 2
-    def __init__(self, size, session, threads):
-        super().__init__(size, session, threads)
-        self.scope     = None
+    def __init__(self, size, session, scope, threads):
+        super().__init__(size, session, scope, threads)
         self.test_mode = False
         self.epsilon = 0.0
         self.board = None
@@ -257,12 +254,11 @@ class DqntrainAgentOne(DqnAgent):
                 self.opponent_mv, new_board, reward, True, self.q)
 
 class DqntrainAgent(Agent):
-    def __init__(self, size, session, threads):
-        super().__init__(size, session, threads)
+    def __init__(self, size, session, scope, threads):
+        super().__init__(size, session, scope, threads)
         self.replay = SumTree(FLAGS.replay_size)
         self.scores = deque()
         self.scores.append(0.0)
-        self.scope = FLAGS.train_generation
         self.nr_games = 0
         self.losses = []
         self.q_network = Network(self.size, self.scope + '/q', self.session)
@@ -536,10 +532,9 @@ class MonteCarloExploer:
         return return_value
 
 class MontecarloAgent(Agent):
-    def __init__(self, size, session, threads):
+    def __init__(self, size, session, scope, threads):
         assert(threads == 1)
-        super().__init__(size, session, threads)
-        self.scope = FLAGS.test_generation
+        super().__init__(size, session, scope, threads)
         self.network = Network(self.size, self.scope + '/q', self.session, True)
         self.network_restored = False
         self.board = None
@@ -591,11 +586,9 @@ class MontecarloAgent(Agent):
         for i, c in enumerate(tree.children):
             if c == None:
                 continue
-            print("{} {} rew = {} tot = {}".format(i // self.size, i % self.size, c.reward, c.total))
             if c.total > max:
                 max = c.total
                 move = i
-        print("exploitation = {} exploration = {}".format(tree.exploitation, tree.exploration))
         assert(move != None)
         move = move // self.size, move % self.size
         self.board[0][move] = True
@@ -604,8 +597,8 @@ class MontecarloAgent(Agent):
         self.board[1][move] = True
 
 class DqntestAgentOne(DqnAgent):
-    def __init__(self, size, session, threads):
-        super().__init__(size, session, 0)
+    def __init__(self, size, session, scope, threads):
+        super().__init__(size, session, scope, 0)
         self.epsilon = FLAGS.test_epsilon
         self.q_network = None
     def init_network(self, network):
@@ -614,9 +607,9 @@ class DqntestAgentOne(DqnAgent):
         return "#"
 
 class DqntestAgent(Agent):
-    def __init__(self, size, session, threads):
-        super().__init__(size, session, threads)
-        self.scopes = FLAGS.test_generation.split(",")
+    def __init__(self, size, session, scope, threads):
+        super().__init__(size, session, scope, threads)
+        self.scopes = self.scope.split(",")
         self.agents = []
         self.networks = []
         for i, scope in enumerate(self.scopes):
@@ -624,7 +617,7 @@ class DqntestAgent(Agent):
             q_network = Network(self.size, scope + '/q', self.session, True)
             self.networks.append(q_network)
             for _ in range(self.threads):
-                agent = DqntestAgentOne(size, session, 0)
+                agent = DqntestAgentOne(size, session, scope, 0)
                 agent.init_network(q_network)
                 self.agents[i].append(agent)
         self.active = None

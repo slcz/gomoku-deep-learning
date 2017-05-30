@@ -2,10 +2,11 @@ import random
 import numpy as np
 
 class Agent:
-    def __init__(self, size, session, threads):
+    def __init__(self, size, session, scope, threads):
         self.size = size
         self.session = session
         self.threads = threads
+        self.scope = scope
     def opponent_move(self, position, thread):
         pass
     def user_input(self, move):
@@ -30,8 +31,8 @@ class Agent:
         pass
 
 class RandomAgent(Agent):
-    def __init__(self, size, session, threads):
-        super().__init__(size, session, threads)
+    def __init__(self, size, session, scope, threads):
+        super().__init__(size, session, scope, threads)
         self.clear()
     def clear(self):
         self.boards = []
@@ -51,9 +52,9 @@ class RandomAgent(Agent):
         return move
 
 class HumanAgent(Agent):
-    def __init__(self, size, session, threads):
+    def __init__(self, size, session, scope, threads):
         assert(threads == 1)
-        super().__init__(size, session, threads)
+        super().__init__(size, session, scope, threads)
         self.clear()
     def clear(self):
         self.board = np.zeros((self.size, self.size), dtype=np.bool_)
@@ -80,9 +81,9 @@ class HumanAgent(Agent):
         return x, y
 
 class WebAgent(Agent):
-    def __init__(self, size, session, threads):
+    def __init__(self, size, session, scope, threads):
         assert(threads == 1)
-        super().__init__(size, session, threads)
+        super().__init__(size, session, scope, threads)
         self.clear()
     def clear(self):
         self.board = np.zeros((self.size, self.size), dtype=np.bool_)
