@@ -1,7 +1,7 @@
 
 ################################################################################
 #
-# Minimax Q learning
+# Q learning
 #
 ################################################################################
 
@@ -220,8 +220,8 @@ class Experience:
         self.step          = step
 
 class DqntrainAgentOne(DqnAgent):
-    def __init__(self, size, session, threads):
-        super().__init__(size, session, threads)
+    def __init__(self, size, session, scope, threads):
+        super().__init__(size, session, scope, threads)
         self.q = 0.0
         self.experience_queue = []
         self.clear()
@@ -271,7 +271,7 @@ class DqntrainAgent(Agent):
         self.copy_network = CopyNetwork(self.q_network, self.target_network)
         self.children = []
         for _ in range(threads):
-            self.children.append(DqntrainAgentOne(size, session, 0))
+            self.children.append(DqntrainAgentOne(size, session, scope, 0))
         self.network_restored = False
     def clear(self):
         super().clear()
