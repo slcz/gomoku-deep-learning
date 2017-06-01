@@ -4,6 +4,7 @@ import numpy as np
 import os
 import random
 from subprocess import call
+import re
 
 def train():
     parser = OptionParser()
@@ -13,14 +14,16 @@ def train():
             default="saved_models", help="model directory")
     (options, _) = parser.parse_args()
     dirs = os.listdir(options.directory)
+    p = re.compile('G[\d]+')
+    dirs = list(filter(lambda x: p.match(x), dirs))
+    n = map(lambda x: int(x[1:]), dirs)
+    latest = max(n)
     paths = [os.path.join(options.directory, d) for d in dirs]
-    models_ = filter(os.path.isdir, paths)
-    models = [d for d in models_]
+    models = list(filter(os.path.isdir, paths))
     models.sort(key = lambda x: os.path.getmtime(x))
     models = [os.path.relpath(m, options.directory) for m in models]
 
-    n = len(models)
-    new_model = 'G' + str(n + 1)
+    new_model = 'G' + str(latest + 1)
 
     if n == 0:
         print()
@@ -33,10 +36,10 @@ def train():
     command = ["./gomoku.py", "--clone", "--copy_from", models[-1], "--copy_to", new_model]
     call(command)
 
-    weights = [1 / (2 ** x) for x in range(1, n + 1)]
+    weights = [1 / x for x in range(1, latest + 1)]
     w = sum(weights)
     weights = list(reversed(list(map(lambda x: x / w, weights))))
-    if (n < options.nmodels):
+    if (latest < options.nmodels):
         test_models = models
     else:
         test_models = np.random.choice(models, replace=False, size = options.nmodels, p = weights)

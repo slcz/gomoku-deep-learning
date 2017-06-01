@@ -38,7 +38,7 @@ tf.app.flags.DEFINE_integer('save_interval', 5000, """intervals to save model"""
 tf.app.flags.DEFINE_integer('decay_interval', 10000, """intervals to epsilon decay""")
 tf.app.flags.DEFINE_float('gamma', 0.9, """gamma""")
 tf.app.flags.DEFINE_integer('copy_network_interval', 8000, """intervals to copy network from qnet to targetnet""")
-tf.app.flags.DEFINE_integer('montecarlo_parallelism', 512, """Monte Carlo execution agents""")
+tf.app.flags.DEFINE_integer('montecarlo_parallelism', 256, """Monte Carlo execution agents""")
 tf.app.flags.DEFINE_integer('montecarlo_totalsteps', 16384, """Monte Carlo time limitation""")
 tf.app.flags.DEFINE_integer('montecarlo_minsteps', 1024, """Monte Carlo time limitation""")
 tf.app.flags.DEFINE_float('uct_exploration', 0.2, """UCT exploration parameter""")
@@ -395,13 +395,12 @@ class MonteCarloTree:
     def __init__(self, size):
         self.size = size
         self.slots = size ** 2
+        self.prior = None
         self.children = []
         for _ in range(self.slots):
             self.children.append(None)
         self.total  = 0.0
         self.reward = 0.0
-        self.exploration  = 0.0
-        self.exploitation = 0.0
     #
     # using UCT formula, evaluation each possible next move.
     # returns the position of the best valuation.
@@ -417,9 +416,8 @@ class MonteCarloTree:
                 c = self.children[i]
                 v1 = c.reward / c.total
                 v2 = FLAGS.uct_exploration * math.sqrt(math.log(self.total) / c.total)
-                self.exploration += v2
-                self.exploitation += v1
-                value = v1 + v2
+                v3 = self.prior[i] / c.total
+                value = v1 + v2 + v3
             evaluations[i] = value
         seq = np.random.permutation(self.slots)
         e = evaluations[seq]
@@ -433,7 +431,8 @@ class MonteCarloExploer:
     state_simulation      = 2
     state_backpropagation = 3
     state_waitfor_move    = 4
-    def __init__(self, size, board, tree):
+    def __init__(self, size, board, tree, network):
+        self.network = network
         self.size  = size
         self.tree  = tree
         self.orig  = board
@@ -458,6 +457,13 @@ class MonteCarloExploer:
         return_value = 0
         if self.state == MonteCarloExploer.state_select:
             fst, snd, m = self.board
+            if self.node.prior is None:
+                state = np.stack(self.board, axis = -1)
+                moves, Q = DqnAgent.select(np.expand_dims(state, axis = 0), self.network)
+                Q = Q.reshape(-1)
+                Q = Q - Q.min()
+                Q /= np.max(np.abs(Q))
+                self.node.prior = Q
             mask = m.ravel()
             move = self.node.select(mask)
             x, y = move // self.size, move % self.size
@@ -553,7 +559,7 @@ class MontecarloAgent(Agent):
         tree = MonteCarloTree(self.size)
         exploers = []
         for i in range(FLAGS.montecarlo_parallelism):
-            exploers.append(MonteCarloExploer(self.size, self.board, tree))
+            exploers.append(MonteCarloExploer(self.size, self.board, tree, self.network))
         wait = 0
         games = 0
         steps = 0
@@ -562,8 +568,6 @@ class MontecarloAgent(Agent):
                 wait += exploer.step()
                 if exploer.state == MonteCarloExploer.state_backpropagation:
                     games += 1
-                    if games % 1000 == 0:
-                        print("games = {}".format(games))
                 steps += 1
                 if steps >= FLAGS.montecarlo_parallelism and wait > 0:
                     steps = 0

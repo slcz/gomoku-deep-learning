@@ -97,7 +97,6 @@ class WebAgent(Agent):
         assert not self.board[x, y]
         self.board[x, y] = True
     def user_input(self, move):
-        print(move)
         if self.waiting:
             x, y = move // self.size, move % self.size
             if x >= 0 and x < self.size and y >= 0 and y < self.size \
