@@ -25,4 +25,4 @@ The example uses pretrained model G79. Use http://<ip address>:5000 to connect t
 ```
     $ ./gomoku.py --agent1 montecarlo --agent2 montecarlo --agent1_model G78 --agent2_model G79 --boardsize 15 --web
 ```
-![screenshot] (https://github.com/slcz/gomoku-dqn-mcts/blob/master/board.png)
+![Alt text](board.png?raw=true "Screen Shot")
