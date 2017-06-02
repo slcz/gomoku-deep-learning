@@ -165,7 +165,8 @@ def next_state():
         game = web_context['game']
         game.clear((players[0].str, players[1].str))
         web_context['state'] = WebSessionState.INGAME
-        r = {"result": "clear"}
+        print(players[0].score, players[1].score)
+        r = {"result": "clear", "black_score": players[0].score, "white_score":players[1].score}
         return jsonify(r)
     elif web_context['state'] == WebSessionState.INGAME:
         players = web_context['game_players']
@@ -179,9 +180,12 @@ def next_state():
         web_context['game_players'] = b, a
         result, connections = game.move(move)
         if result == Result.WIN:
+            a.score += 1.0
             web_context['state'] = WebSessionState.ENDGAME
             web_context['connections'] = connections
         elif result == Result.TIE:
+            players[0].score += 0.5
+            players[1].score += 0.5
             web_context['state'] = WebSessionState.ENDGAME
             web_context['connections'] = []
         x, y = move

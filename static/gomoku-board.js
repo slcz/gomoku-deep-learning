@@ -12,6 +12,7 @@ var rect = canvas.getBoundingClientRect();
 var user_input = -1;
 var waiting    = false;
 var fst = null, snd = null;
+var order = 1;
 
 addEventListener("load", function(event) {
     var req = new XMLHttpRequest();
@@ -30,6 +31,7 @@ addEventListener("load", function(event) {
             snd  = obj["fst"];
         }
         drawboard(context, unit, size);
+        order = 1;
         var newreq = new XMLHttpRequest();
         newreq.addEventListener("load", request_received);
 
@@ -69,7 +71,10 @@ function request_received() {
     var newreq = false;
     var timeout = 100;
     switch (obj["result"]) {
-        case "clear":   drawboard(context, unit, size);
+        case "clear":   var b = obj["black_score"];
+                        var w = obj["white_score"];
+                        drawboard(context, unit, size, b, w);
+                        order = 1;
                         user_input = -1;
                         waiting = false;
                         newreq = true;
@@ -92,7 +97,8 @@ function request_received() {
                         break;
         case "move":
                         var m = obj["move"];
-                        drawstone(context, m[1], m[0], unit, color);
+                        drawstone(context, m[1], m[0], unit, color, order);
+                        order ++;
                         color = !color;
                         newreq = true;
                         break;
@@ -111,26 +117,52 @@ function highlights(context, x, y, unit, color) {
     var _x = (x + 1) * unit, _y = (y + 1) * unit;
     context.beginPath();
     context.moveTo(_x, _y);
-    context.arc(_x, _y, Math.floor(unit / 5), 0, 2 * Math.PI);
+    context.arc(_x, _y, Math.floor(unit / 10), 0, 2 * Math.PI);
     context.fillStyle =color ? "black" : "white";
     context.fill();
 }
 
-function drawstone(context, x, y, unit, color) {
+function drawstone(context, x, y, unit, color, order) {
     context.fillStyle = color ? "black" : "white";
     var _x = (x + 1) * unit, _y = (y + 1) * unit;
     context.beginPath();
-    context.moveTo(_x, _y);
+    var radius = Math.floor(unit / 5 * 2);
+    context.moveTo(_x + radius, _y);
     context.arc(_x, _y, Math.floor(unit / 5 * 2), 0, 2 * Math.PI);
     context.strokeStyle = "black";
     context.stroke();
     context.fill();
+    if (order != undefined) {
+        context.font = "12px verdana";
+        context.fillStyle = color ? "white" : "black";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(order, _x, _y);
+    }
 }
 
-function drawboard(context, unit, size) {
+function drawboard(context, unit, size, b, w) {
     context.fillStyle = "#ffffcc";
     context.fillRect(0, 0, (size + 2) * unit, (size + 2) * unit);
     context.beginPath();
+    if (b != undefined) {
+        drawstone(context, 1, size, unit, true);
+        context.font = "12px verdana";
+        context.fillStyle = "black";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(b, unit * 3, unit * (size + 1));
+    }
+    if (w != undefined) {
+        var offset = Math.floor(unit * size / 2);
+        var o = Math.floor(size / 2);
+        drawstone(context, 1 + o, size, unit, false);
+        context.font = "12px verdana";
+        context.fillStyle = "black";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(w, unit * 3 + offset, unit * (size + 1));
+    }
     for (var x = unit; x <= unit * (size + 1); x += unit) {
         context.moveTo(x, unit);
         context.lineTo(x, unit * size);
@@ -159,6 +191,7 @@ function drawboard(context, unit, size) {
                 var x = i % size
                 fst_moves ++;
                 drawstone(context, x, y, unit, true);
+                order ++;
             }
         }
         fst = null
