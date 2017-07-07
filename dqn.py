@@ -39,7 +39,7 @@ tf.app.flags.DEFINE_integer('decay_interval', 10000, """intervals to epsilon dec
 tf.app.flags.DEFINE_float('gamma', 0.9, """gamma""")
 tf.app.flags.DEFINE_integer('copy_network_interval', 8000, """intervals to copy network from qnet to targetnet""")
 tf.app.flags.DEFINE_integer('montecarlo_parallelism', 256, """Monte Carlo execution agents""")
-tf.app.flags.DEFINE_integer('montecarlo_totalsteps', 16384, """Monte Carlo time limitation""")
+tf.app.flags.DEFINE_integer('montecarlo_totalsteps', 4096, """Monte Carlo time limitation""")
 tf.app.flags.DEFINE_integer('montecarlo_minsteps', 1024, """Monte Carlo time limitation""")
 tf.app.flags.DEFINE_float('uct_exploration', 0.2, """UCT exploration parameter""")
 
