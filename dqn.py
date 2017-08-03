@@ -61,7 +61,7 @@ class Network:
         self.model_location = os.path.join(self.path, "model")
 
     def savable_variables(self):
-        vs = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.scope)
+        vs = tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, scope=self.scope)
         if not self.readonly:
             vs.append(tf.contrib.framework.get_global_step())
         return vs
