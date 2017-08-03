@@ -16,8 +16,11 @@ def train():
     dirs = os.listdir(options.directory)
     p = re.compile('G[\d]+')
     dirs = list(filter(lambda x: p.match(x), dirs))
-    n = map(lambda x: int(x[1:]), dirs)
-    latest = max(n)
+    n = list(map(lambda x: int(x[1:]), dirs))
+    if not n:
+        latest = 0
+    else:
+        latest = max(n)
     paths = [os.path.join(options.directory, d) for d in dirs]
     models = list(filter(os.path.isdir, paths))
     models.sort(key = lambda x: os.path.getmtime(x))
@@ -25,7 +28,7 @@ def train():
 
     new_model = 'G' + str(latest + 1)
 
-    if n == 0:
+    if not n:
         print()
         print("***** NEW  GENERATION {} *****".format(new_model))
         print()
@@ -48,7 +51,10 @@ def train():
     print("***** NEW  GENERATION {} *****".format(new_model))
     print("*** TEST GENERATION {} ***".format(testgen))
     print()
-    command = ["./gomoku.py", "--agent1", "dqntrain", "--agent2", "dqntest", "--agent1_model", new_model, "--agent2_model", testgen, "--concurrency", "512", "--boardsize", "15"]
+    command = ["./gomoku.py", "--agent1", "dqntrain",
+            "--agent2", "dqntest", "--agent1_model",
+            new_model, "--agent2_model", testgen,
+            "--concurrency", "512", "--boardsize", "9"]
     call(command)
 
 if __name__ == "__main__":
