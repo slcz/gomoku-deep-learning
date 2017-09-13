@@ -21,6 +21,7 @@ def train():
         latest = 0
     else:
         latest = max(n)
+    nr_models = len(n)
     paths = [os.path.join(options.directory, d) for d in dirs]
     models = list(filter(os.path.isdir, paths))
     models.sort(key = lambda x: os.path.getmtime(x))
@@ -39,12 +40,13 @@ def train():
     command = ["./gomoku.py", "--clone", "--copy_from", models[-1], "--copy_to", new_model]
     call(command)
 
-    weights = [1 / x for x in range(1, latest + 1)]
+    weights = [1 / x for x in range(1, nr_models + 1)]
     w = sum(weights)
     weights = list(reversed(list(map(lambda x: x / w, weights))))
-    if (latest < options.nmodels):
+    if (nr_models < options.nmodels):
         test_models = models
     else:
+        print(models, options.nmodels, weights)
         test_models = np.random.choice(models, replace=False, size = options.nmodels, p = weights)
     testgen = ','.join(test_models)
     print()
