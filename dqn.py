@@ -244,6 +244,17 @@ class DqntrainAgentOne(DqnAgent):
             self.append_replay_buf(self.orig_board, self.self_mv,
                 self.opponent_mv, new_board, reward, True, self.q)
 
+def transform(new, ini, move, fun, funmove):
+    a, b, c = new
+    a = fun(a)
+    b = fun(b)
+    c = fun(c)
+    d, e, f = ini
+    d = fun(d)
+    e = fun(e)
+    f = fun(f)
+    return (a, b, c), (d, e, f), funmove(move)
+
 class DqntrainAgent(Agent):
     def __init__(self, size, session, scope, threads):
         super().__init__(size, session, scope, threads)
@@ -304,10 +315,33 @@ class DqntrainAgent(Agent):
         stages  = []
         for idx, prio, sample in mini_batch:
             assert(sample.q == prio)
-            inputs.append(np.stack(sample.new_board, axis = -1))
+            self_move = sample.self_move
+            new_board = sample.new_board
+            initial_board = sample.initial_board
+            # data augmentation
+            if random.random() < 0.5:
+                new_board, initial_board, self_move = \
+                    transform(new_board, initial_board, self_move,
+                              lambda x: np.transpose(x),
+                              lambda x: (x[1], x[0]))
+            if random.random() < 0.5:
+                new_board, initial_board, self_move = \
+                    transform(new_board, initial_board, self_move,
+                              lambda x: np.flip(x, axis = 0),
+                              lambda x: (self.size - 1 - x[0], x[1]))
+            if random.random() < 0.5:
+                new_board, initial_board, self_move = \
+                    transform(new_board, initial_board, self_move,
+                              lambda x: np.flip(x, axis = 1),
+                              lambda x: (x[0], self.size - 1 - x[1]))
+            a, b, c = new_board
+            assert(a[self_move] == True and b[self_move] == False and c[self_move] == True)
+            a, b, c = initial_board
+            assert(a[self_move] == False and b[self_move] == False and c[self_move] == False)
+            inputs.append(np.stack(new_board, axis = -1))
             ends.append(1 - sample.end)
-            orig.append(np.stack(sample.initial_board, axis = -1))
-            actions.append(sample.self_move)
+            orig.append(np.stack(initial_board, axis = -1))
+            actions.append(self_move)
             rewards.append(sample.reward)
             stages.append(sample.step)
         move, _ = DqnAgent.select(inputs, self.q_network)
