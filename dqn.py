@@ -21,13 +21,15 @@ tf.app.flags.DEFINE_string('model_dir', './saved_models',
         """Directory to save the trained models""")
 tf.app.flags.DEFINE_string('agent1_model', None, """agent1 model""")
 tf.app.flags.DEFINE_string('agent2_model', None, """agent2 model""")
+tf.app.flags.DEFINE_boolean('agent1_auto', False, """agent1 auto resolve""")
+tf.app.flags.DEFINE_boolean('agent2_auto', False, """agent2 auto resolve""")
 tf.app.flags.DEFINE_float('learn_rate', 0.0002, """learning rate""")
 tf.app.flags.DEFINE_string('copy_from', None, """copy from model""")
 tf.app.flags.DEFINE_string('copy_to', None, """copy to model""")
 tf.app.flags.DEFINE_float('train_epsilon', 0.2, """epsilon greedy""")
 tf.app.flags.DEFINE_float('test_epsilon', 0.02, """epsilon greedy""")
 tf.app.flags.DEFINE_float('mcts_epsilon', 0.2, """epsilon greedy""")
-tf.app.flags.DEFINE_float('epsilon_decay', 0.8, """epsilon decay rate""")
+tf.app.flags.DEFINE_float('epsilon_decay', 0.95, """epsilon decay rate""")
 tf.app.flags.DEFINE_float('priority_weight', 1.0, """priority wieght 0-1""")
 tf.app.flags.DEFINE_integer('trainbatch', 64, """training batch size""")
 tf.app.flags.DEFINE_integer('replay_size', 1000000, """replay buffer size""")
@@ -35,7 +37,7 @@ tf.app.flags.DEFINE_integer('train_iterations', 1, """training iterations""")
 tf.app.flags.DEFINE_integer('train_interval',   1, """training interval""")
 tf.app.flags.DEFINE_integer('observations', 10000, """initial observations""")
 tf.app.flags.DEFINE_integer('save_interval', 5000, """intervals to save model""")
-tf.app.flags.DEFINE_integer('decay_interval', 10000, """intervals to epsilon decay""")
+tf.app.flags.DEFINE_integer('decay_interval', 5000, """intervals to epsilon decay""")
 tf.app.flags.DEFINE_float('gamma', 0.9, """gamma""")
 tf.app.flags.DEFINE_integer('copy_network_interval', 10000, """intervals to copy network from qnet to targetnet""")
 tf.app.flags.DEFINE_integer('montecarlo_parallelism', 256, """Monte Carlo execution agents""")
@@ -93,20 +95,22 @@ class Network:
                 tf.slice(self.actions, [0, 0], [-1, 1]) \
                 * self.size + tf.slice(self.actions, [0, 1], [-1, 1]), [-1])
 
-        net = tf.contrib.layers.conv2d(self.input, 256, 5, 1,
+        net = tf.contrib.layers.conv2d(self.input, 64, 5, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv1')
-        net = tf.contrib.layers.conv2d(net, 256, 3, 1,
+        net = tf.contrib.layers.conv2d(net, 64, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv2')
-        net = tf.contrib.layers.conv2d(net, 256, 3, 1,
+        net = tf.contrib.layers.conv2d(net, 64, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv3')
-        net = tf.contrib.layers.conv2d(net, 256, 3, 1,
+        net = tf.contrib.layers.conv2d(net, 64, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv4')
-        net = tf.contrib.layers.conv2d(net, 256, 3, 1,
+        net = tf.contrib.layers.conv2d(net, 64, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv5')
-        net = tf.contrib.layers.conv2d(net, 256, 3, 1,
+        net = tf.contrib.layers.conv2d(net, 64, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv6')
-        net = tf.contrib.layers.conv2d(net, 256, 3, 1,
+        net = tf.contrib.layers.conv2d(net, 64, 3, 1,
                 activation_fn=tf.nn.relu, padding='SAME', scope='conv7')
+        net = tf.contrib.layers.conv2d(net, 64, 3, 1,
+                activation_fn=tf.nn.relu, padding='SAME', scope='conv8')
         net = tf.contrib.layers.conv2d(net, 1, 1, 1,
                 activation_fn=None, padding='SAME', scope='onebyone')
         self.predictions = tf.contrib.layers.flatten(net)
@@ -161,6 +165,8 @@ class DqnAgent(Agent):
     state_mask     = 2
     def __init__(self, size, session, scope, threads):
         super().__init__(size, session, scope, threads)
+        self.autoresolve = False
+        self.rules = Rules(size, FLAGS.connections)
         self.test_mode = False
         self.epsilon = 0.0
         self.board = None
@@ -170,6 +176,7 @@ class DqnAgent(Agent):
         self.board = np.zeros((self.size, self.size), dtype = np.int32), \
                      np.zeros((self.size, self.size), dtype = np.int32), \
                      np.zeros((self.size, self.size), dtype = np.int32)
+        self.fst_move = self.snd_move = None
     def update_state_(self, position, mover):
         mask = self.board[2]
         mover_board = self.board[mover]
@@ -185,19 +192,41 @@ class DqnAgent(Agent):
         m = np.argmax(out, axis = 1)
         return m, out
     def self_move(self, _):
-        _, _, mask = self.board
+        fst, snd, mask = self.board
+        move = None
+        if self.autoresolve and self.fst_move and self.snd_move:
+            if move == None:
+                win_condition, set = self.rules.check_win(self.fst_move, fst, mask)
+                if win_condition:
+                    for s in set:
+                        x, y = s // self.size, s % self.size
+                        if fst[(x, y)] == 0.0:
+                            move = x, y
+                            break
+            if move == None:
+                win_condition, set = self.rules.check_win(self.snd_move, snd, mask)
+                if win_condition:
+                    for s in set:
+                        x, y = s // self.size, s % self.size
+                        move = x, y
+                        if snd[(x, y)] == 0.0:
+                            move = x, y
+                            break
         m, q = self.buffered_move
-        if random.uniform(0, 1) < self.epsilon:
-            x, y = move = super().random_policy(mask)
-        else:
-            assert(self.buffered_move != None)
-            x, y = move = m // self.size, m % self.size
+        if move == None:
+            if random.uniform(0, 1) < self.epsilon:
+                x, y = move = super().random_policy(mask)
+            else:
+                assert(self.buffered_move != None)
+                x, y = move = m // self.size, m % self.size
         q_value = q[x * self.size + y]
         self.buffered_move = None
         self.update_state_(move, DqnAgent.state_self)
+        self.fst_move = move
         return move, q_value
     def opponent_move(self, position, _):
         self.update_state_(position, DqnAgent.state_opponent)
+        self.snd_move = position
 
 class Experience:
     def __init__(self, initial_board, self_mv, oppo_mv, new_board, reward, end, q, step):
@@ -233,6 +262,7 @@ class DqntrainAgentOne(DqnAgent):
                     self.opponent_mv, new_board, 0.0, False, self.q)
         self.orig_board = new_board
         self.self_mv, self.q = super().self_move(thread)
+        assert(self.autoresolve == False)
         return self.self_mv
     def opponent_move(self, move, thread):
         super().opponent_move(move, thread)
@@ -275,6 +305,9 @@ class DqntrainAgent(Agent):
         for _ in range(threads):
             self.children.append(DqntrainAgentOne(size, session, scope, 0))
         self.network_restored = False
+    def set_autoresolve(self, resolve):
+        for i in self.children:
+            i.autoresolve = resolve
     def clear(self):
         super().clear()
         for child in self.children:
@@ -630,6 +663,9 @@ class DqntestAgentOne(DqnAgent):
         super().__init__(size, session, scope, 0)
         self.epsilon = FLAGS.test_epsilon
         self.q_network = None
+    def self_move(self, thread):
+        assert(self.autoresolve == True)
+        return super().self_move(thread)
     def init_network(self, network):
         self.q_network = network
     def name(self):
@@ -651,6 +687,10 @@ class DqntestAgent(Agent):
                 self.agents[i].append(agent)
         self.active = None
         self.network_restored = False
+    def set_autoresolve(self, resolve):
+        for i in self.agents:
+            for j in i:
+                j.autoresolve = resolve
     def name(self):
         return "#"
     def opponent_move(self, position, thread):

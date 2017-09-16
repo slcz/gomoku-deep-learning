@@ -234,6 +234,8 @@ def main(argv=None):
             print("Agent {} or {} does not exist".format(FLAGS.agent1, FLAGS.agent2))
             sys.exit(1)
         i += 1
+    players[0].agent.set_autoresolve(FLAGS.agent1_auto)
+    players[1].agent.set_autoresolve(FLAGS.agent2_auto)
     sess.run(tf.global_variables_initializer())
 
     for player in players:
