@@ -33,7 +33,7 @@ def train():
         print()
         print("***** NEW  GENERATION {} *****".format(new_model))
         print()
-        command = ["./gomoku.py", "--agent1", "dqntrain", "--agent2", "random", "--agent1_model", new_model, "--concurrency", "1024", "check_stop", "4096"]
+        command = ["./gomoku.py", "--agent1", "dqntrain", "--agent2", "random", "--agent1_model", new_model, "--concurrency", "64", "--check_stop", "4096"]
         call(command)
         return
 
@@ -56,7 +56,7 @@ def train():
     command = ["./gomoku.py", "--agent1", "dqntrain",
             "--agent2", "dqntest", "--agent1_model",
             new_model, "--agent2_model", testgen,
-            "--concurrency", "512", "--boardsize", "9"]
+            "--concurrency", "32", "--boardsize", "15"]
     call(command)
 
 if __name__ == "__main__":
