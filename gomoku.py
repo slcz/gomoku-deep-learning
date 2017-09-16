@@ -270,12 +270,12 @@ def main(argv=None):
             total_moves += moves
         if FLAGS.board:
             for result, moves in zip(results, allmoves):
-                if result == result.WIN:
+                if result == Result.WIN:
                     print("{} WIN".format(players[(moves - 1) % 2].str))
                 else:
                     print("TIE")
         for result, moves in zip(results, allmoves):
-            if result == result.WIN:
+            if result == Result.WIN:
                 players[(moves - 1) % 2].score += 1.0
                 if players[(moves - 1) % 2].agent.name() == "@":
                     latest_games.append(1.0)
