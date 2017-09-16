@@ -16,6 +16,7 @@ from SumTree import SumTree
 import math
 
 FLAGS = tf.app.flags.FLAGS
+tf.app.flags.DEFINE_boolean('display_AI', False, """Display AI thinking""")
 tf.app.flags.DEFINE_string('summaries_dir', '/tmp/summaries', """summary dir""")
 tf.app.flags.DEFINE_string('model_dir', './saved_models',
         """Directory to save the trained models""")
@@ -219,11 +220,10 @@ class DqnAgent(Agent):
             else:
                 assert(self.buffered_move != None)
                 x, y = move = m // self.size, m % self.size
-        q_value = q[x * self.size + y]
         self.buffered_move = None
         self.update_state_(move, DqnAgent.state_self)
         self.fst_move = move
-        return move, q_value
+        return move, q
     def opponent_move(self, position, _):
         self.update_state_(position, DqnAgent.state_opponent)
         self.snd_move = position
@@ -262,7 +262,8 @@ class DqntrainAgentOne(DqnAgent):
                     self.opponent_mv, new_board, 0.0, False, self.q)
         self.orig_board = new_board
         self.self_mv, self.q = super().self_move(thread)
-        assert(self.autoresolve == False)
+        x, y = self.self_mv
+        self.q = self.q[x * self.size + y]
         return self.self_mv
     def opponent_move(self, move, thread):
         super().opponent_move(move, thread)
@@ -317,7 +318,7 @@ class DqntrainAgent(Agent):
             self.q_network.restore()
             self.network_restored = True
     def name(self):
-        return "@"
+        return "a"
     def self_move(self, thread):
         agent = self.children[thread]
         if agent.buffered_move == None:
@@ -612,7 +613,7 @@ class MontecarloAgent(Agent):
         self.board.append(np.zeros((self.size, self.size), dtype=np.bool_))
         self.board.append(np.zeros((self.size, self.size), dtype=np.bool_))
     def name(self):
-        return "#"
+        return "M"
     def self_move(self, thread):
         tree = MonteCarloTree(self.size)
         exploers = []
@@ -664,7 +665,6 @@ class DqntestAgentOne(DqnAgent):
         self.epsilon = FLAGS.test_epsilon
         self.q_network = None
     def self_move(self, thread):
-        assert(self.autoresolve == True)
         return super().self_move(thread)
     def init_network(self, network):
         self.q_network = network
@@ -687,12 +687,13 @@ class DqntestAgent(Agent):
                 self.agents[i].append(agent)
         self.active = None
         self.network_restored = False
+        self.q = None
     def set_autoresolve(self, resolve):
         for i in self.agents:
             for j in i:
                 j.autoresolve = resolve
     def name(self):
-        return "#"
+        return "A" + self.scope
     def opponent_move(self, position, thread):
         agent = self.active[thread]
         agent.opponent_move(position, thread)
@@ -705,9 +706,14 @@ class DqntestAgent(Agent):
             m, Q = DqnAgent.select(inputs, agent.q_network)
             for a, move, q in zip(self.active, m, Q):
                 a.buffered_move = (move, q)
-        move, _ = agent.self_move(thread)
+        move, self.q = agent.self_move(thread)
         agent.buffered_move = None
         return move
+    def get_values(self):
+        if FLAGS.display_AI:
+            return self.q.reshape([-1])
+        else:
+            return []
     def finish(self, result, thread):
         agent = self.active[thread]
         return agent.finish(result, thread)

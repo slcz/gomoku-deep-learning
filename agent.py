@@ -7,6 +7,10 @@ class Agent:
         self.session = session
         self.threads = threads
         self.scope = scope
+    def get_values(self):
+        return np.array([], dtype=np.float32)
+    def set_autoresolve(self, resolve):
+        pass
     def opponent_move(self, position, thread):
         pass
     def user_input(self, move):
@@ -39,7 +43,7 @@ class RandomAgent(Agent):
         for i in range(self.threads):
             self.boards.append(np.zeros((self.size, self.size), dtype=np.bool_))
     def name(self):
-        return "X"
+        return "R"
     def opponent_move(self, position, thread):
         x, y = position
         board = self.boards[thread]
@@ -90,7 +94,7 @@ class WebAgent(Agent):
         self.waiting = False
         self.nextmove = None
     def name(self):
-        return "w"
+        return "H"
     def opponent_move(self, position, thread):
         assert(thread == 0)
         x, y = position

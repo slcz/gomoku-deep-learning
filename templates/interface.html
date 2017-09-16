@@ -1,4 +1,12 @@
 <html>
-	<canvas width="360" height="360"></canvas>
+<style>
+	#board, #evaluation {
+		position: absolute;
+		left: 0;
+		top: 0;
+	}
+</style>
+	<canvas class="canvas" id="board" width="360" height="360"></canvas>
+	<canvas calss="canvas" id="evaluation" width="360" height="360"></canvas>
 	<script type="text/javascript" src="{{ url_for('static', filename='gomoku-board.js') }}"></script>
 </html>

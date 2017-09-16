@@ -166,13 +166,22 @@ def next_state():
         game.clear((players[0].str, players[1].str))
         web_context['state'] = WebSessionState.INGAME
         print(players[0].score, players[1].score)
-        r = {"result": "clear", "black_score": players[0].score, "white_score":players[1].score}
+        r = {"result": "clear", "black_score": players[0].score, "white_score":players[1].score,
+             "black_name": players[0].agent.name(), "white_name": players[1].agent.name()}
         return jsonify(r)
     elif web_context['state'] == WebSessionState.INGAME:
         players = web_context['game_players']
         game = web_context['game']
         a, b = players
         move = a.agent.self_move(0)
+        evaluations_ = a.agent.get_values()
+        evaluations = []
+        if len(evaluations_) > 0:
+            min = np.min(evaluations_)
+            evaluations_ -= min
+            max = np.max(evaluations_)
+            for i in evaluations_:
+                evaluations.append(int(i * 100 / max))
         if move == None:
             r = {"result": "none"}
             return jsonify(r)
@@ -190,7 +199,7 @@ def next_state():
             web_context['connections'] = []
         x, y = move
         m = int(x), int(y)
-        r = {"result": "move", "move": m}
+        r = {"result": "move", "move": m, "evaluations": evaluations}
         return jsonify(r)
     elif web_context['state'] == WebSessionState.ENDGAME:
         web_context['state'] = WebSessionState.START

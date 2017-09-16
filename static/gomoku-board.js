@@ -1,5 +1,6 @@
 "use strict";
-var canvas = document.querySelector("canvas");
+var canvas = document.getElementById("board");
+var evaluation = document.getElementById("evaluation");
 var context = canvas.getContext("2d");
 var size = 15;
 
@@ -63,6 +64,25 @@ addEventListener("click", function(event) {
     }
 });
 
+function drawevaluations(context, e, unit, color) {
+    context.clearRect(0, 0, width, height);
+    for (var x = 0; x < e.length; x += 1) {
+        e[x] = Math.floor(e[x] * unit / 6 / 100);
+    }
+    context.fillStyle = "rgba(128,128,128,0.1)";
+    context.beginPath();
+    for (var y = 0; y < size; y += 1) {
+        for (var x = 0; x < size; x += 1) {
+            var i = y * size + x;
+            var _x = Math.floor((x + 1) * unit), _y = Math.floor((y + 1) * unit);
+            var sz = e[i];
+            context.moveTo(_x - sz, _y - sz);
+            context.arc(_x, _y, sz, 0, 2 * Math.PI);
+            context.fill();
+        }
+    }
+}
+
 var color = true;
 
 function request_received() {
@@ -73,7 +93,9 @@ function request_received() {
     switch (obj["result"]) {
         case "clear":   var b = obj["black_score"];
                         var w = obj["white_score"];
-                        drawboard(context, unit, size, b, w);
+                        var bn = obj["black_name"];
+                        var wn = obj["white_name"];
+                        drawboard(context, unit, size, b, w, bn, wn);
                         order = 1;
                         user_input = -1;
                         waiting = false;
@@ -99,6 +121,10 @@ function request_received() {
                         var m = obj["move"];
                         drawstone(context, m[1], m[0], unit, color, order);
                         order ++;
+                        var e = obj["evaluations"];
+                        if (e.length > 0) {
+                            drawevaluations(evaluation.getContext("2d"), e, unit, color)
+                        }
                         color = !color;
                         newreq = true;
                         break;
@@ -141,7 +167,7 @@ function drawstone(context, x, y, unit, color, order) {
     }
 }
 
-function drawboard(context, unit, size, b, w) {
+function drawboard(context, unit, size, b, w, bn, wn) {
     context.fillStyle = "#ffffcc";
     context.fillRect(0, 0, (size + 2) * unit, (size + 2) * unit);
     context.beginPath();
@@ -151,7 +177,7 @@ function drawboard(context, unit, size, b, w) {
         context.fillStyle = "black";
         context.textAlign = "center";
         context.textBaseline = "middle";
-        context.fillText(b, unit * 3, unit * (size + 1));
+        context.fillText(b + " " + bn, unit * 3, unit * (size + 1));
     }
     if (w != undefined) {
         var offset = Math.floor(unit * size / 2);
@@ -161,13 +187,13 @@ function drawboard(context, unit, size, b, w) {
         context.fillStyle = "black";
         context.textAlign = "center";
         context.textBaseline = "middle";
-        context.fillText(w, unit * 3 + offset, unit * (size + 1));
+        context.fillText(w + " " + wn, unit * 3 + offset, unit * (size + 1));
     }
-    for (var x = unit; x <= unit * (size + 1); x += unit) {
+    for (var x = unit; x <= unit * size; x += unit) {
         context.moveTo(x, unit);
         context.lineTo(x, unit * size);
     }
-    for (var x = unit; x <= unit * (size + 1); x += unit) {
+    for (var x = unit; x <= unit * size; x += unit) {
         context.moveTo(unit, x);
         context.lineTo(unit * size, x);
     }
