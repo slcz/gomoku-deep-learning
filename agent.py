@@ -7,6 +7,8 @@ class Agent:
         self.session = session
         self.threads = threads
         self.scope = scope
+    def set_autoresolve(self, flag):
+        pass
     def opponent_move(self, position, thread):
         pass
     def user_input(self, move):
