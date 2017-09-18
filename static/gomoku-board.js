@@ -7,7 +7,7 @@ var size = 15;
 var width = canvas.width;
 var height = canvas.height;
 var pixels = width < height ? width : height;
-var unit = pixels / (size + 2);
+var unit = pixels / (size + 3);
 var rect = canvas.getBoundingClientRect();
 
 var user_input = -1;
@@ -22,7 +22,7 @@ addEventListener("load", function(event) {
     req.addEventListener("load", function() {
         var obj = JSON.parse(req.responseText);
         size = obj["size"]; 
-        unit = pixels / (size + 2);
+        unit = pixels / (size + 3);
         moves = obj["moves"];
         if (moves % 2 == 0) {
             fst  = obj["fst"];

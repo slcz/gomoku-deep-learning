@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 import numpy as np
 from enum import Enum
 import random
@@ -180,6 +181,8 @@ def next_state():
             min = np.min(evaluations_)
             evaluations_ -= min
             max = np.max(evaluations_)
+            if max == 0.0:
+                max = 0.1
             for i in evaluations_:
                 evaluations.append(int(i * 100 / max))
         if move == None:
