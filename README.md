@@ -8,6 +8,11 @@ The model is trained on single Nvidia 1080 GTX, with tensorflow 1.0 and python 3
     - tensorflow
 
 ## Basic Usage:
+* Play with pretrained model, should be reasonable at e.g. 11x11, 15x15 board size. This only uses Dqn network, no searching involved!
+```
+python gomoku.py --agent1 web --agent2 dqntest --agent2_model G20 --web --boardsize 11 # Browser points to http://127.0.0.1:5000 to play a game with AI.
+```
+
 * Training models with default parameters. The script repeatedly searches for the latest (greatest?) model under saved_models and randomly selects an opponent model for training.
 ```
     $ ./train.py
